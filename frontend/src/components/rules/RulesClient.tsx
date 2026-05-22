@@ -87,6 +87,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
   const [statusFilter, setStatusFilter] = useState<RuleStatus | 'all'>('all')
   const [severityFilter, setSeverityFilter] = useState<string>('all')
   const [tableFilter, setTableFilter] = useState('')
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'generic' | 'object-specific'>('all')
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -98,6 +99,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
     type: 'null_check' as RuleType, connectionId: connections[0]?.id || '',
     tableName: '', columnName: '', severity: 'high' as Rule['severity'],
     status: 'active' as RuleStatus,
+    scope: 'generic' as 'generic' | 'object-specific',
     paramMin: '', paramMax: '', paramPattern: '', paramAge: '', paramRows: '',
     paramAcceptedValues: '', paramCondition: '', paramExpectedColumns: '',
     paramMetricSql: '', paramSampleSize: '100', paramValidationPrompt: '',
@@ -122,6 +124,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
     if (statusFilter !== 'all') result = result.filter(r => (r.status || (r.enabled ? 'active' : 'disabled')) === statusFilter)
     if (severityFilter !== 'all') result = result.filter(r => r.severity === severityFilter)
     if (tableFilter) result = result.filter(r => r.tableName === tableFilter)
+    if (scopeFilter !== 'all') result = result.filter(r => (r.scope || 'generic') === scopeFilter)
     if (search) {
       const q = search.toLowerCase()
       result = result.filter(r => r.name.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q) || r.tableName.toLowerCase().includes(q))
@@ -208,8 +211,11 @@ export default function RulesClient({ initialRules, connections }: Props) {
     })
   }
 
+  const isGeneric = form.scope === 'generic'
+  const canSave = form.name && form.connectionId && (isGeneric || form.tableName)
+
   async function save() {
-    if (!form.name || !form.connectionId || !form.tableName) return
+    if (!canSave) return
     setSaving(true)
     const params: Record<string, unknown> = {}
     if (['range', 'range_check'].includes(form.type)) { if (form.paramMin) params.min = parseFloat(form.paramMin); if (form.paramMax) params.max = parseFloat(form.paramMax) }
@@ -225,9 +231,12 @@ export default function RulesClient({ initialRules, connections }: Props) {
     if (form.type === 'llm_semantic_check') { params.sample_size = parseInt(form.paramSampleSize || '100'); params.validation_prompt = form.paramValidationPrompt }
     if (['custom_sql', 'custom_sql_check'].includes(form.type)) params.sql = form.customSql
 
+    // For generic rules with no table, set to ALL_TABLES
+    const tableName = form.tableName || (isGeneric ? 'ALL_TABLES' : '')
+
     const res = await fetch('/api/rules', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: form.name, description: form.description, category: form.category, type: form.type, connectionId: form.connectionId, tableName: form.tableName, columnName: form.columnName || undefined, severity: form.severity, status: form.status, parameters: params })
+      body: JSON.stringify({ name: form.name, description: form.description, category: form.category, type: form.type, connectionId: form.connectionId, tableName, columnName: form.columnName || undefined, severity: form.severity, status: form.status, scope: form.scope, parameters: params })
     })
     const newRule = await res.json()
     setRules(prev => [...prev, { ...newRule, status: form.status }])
@@ -273,6 +282,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
       name: rule.name, description: rule.description || '', category: rule.category,
       type: rule.type, connectionId: rule.connectionId, tableName: rule.tableName,
       columnName: rule.columnName || '', severity: rule.severity,
+      scope: rule.scope || 'generic',
       status: rule.status || (rule.enabled ? 'active' : 'disabled'),
       paramMin: String(rule.parameters?.min ?? rule.parameters?.min_value ?? ''),
       paramMax: String(rule.parameters?.max ?? rule.parameters?.max_value ?? ''),
@@ -302,7 +312,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
     fontSize: '13px', color: '#0f172a', background: '#fafaf9', outline: 'none', ...style
   })
 
-  const activeFilterCount = [activeCategory !== 'all', statusFilter !== 'all', severityFilter !== 'all', tableFilter !== ''].filter(Boolean).length
+  const activeFilterCount = [activeCategory !== 'all', statusFilter !== 'all', severityFilter !== 'all', tableFilter !== '', scopeFilter !== 'all'].filter(Boolean).length
 
   /* ── Render ───────────────────────────────────────────────────── */
 
@@ -358,8 +368,13 @@ export default function RulesClient({ initialRules, connections }: Props) {
           <option value="">All Tables</option>
           {uniqueTables.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
+        <select value={scopeFilter} onChange={e => setScopeFilter(e.target.value as typeof scopeFilter)} style={{ ...inp(), width: 'auto', minWidth: '150px' }}>
+          <option value="all">All Scopes</option>
+          <option value="generic">🔧 Generic</option>
+          <option value="object-specific">🎯 Object-Specific</option>
+        </select>
         {activeFilterCount > 0 && (
-          <button onClick={() => { setActiveCategory('all'); setStatusFilter('all'); setSeverityFilter('all'); setTableFilter(''); setSearch('') }}
+          <button onClick={() => { setActiveCategory('all'); setStatusFilter('all'); setSeverityFilter('all'); setTableFilter(''); setScopeFilter('all'); setSearch('') }}
             style={{ padding: '7px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#dc2626', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>
             ✕ Clear filters ({activeFilterCount})
           </button>
@@ -406,11 +421,11 @@ export default function RulesClient({ initialRules, connections }: Props) {
       {/* Rules Table */}
       <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #ebe8df', overflow: 'hidden' }}>
         {/* Table Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 110px 100px 100px 90px 120px 80px', gap: '8px', padding: '10px 16px', borderBottom: '1px solid #f3f1ea', background: '#fafaf9' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 110px 70px 100px 100px 100px 100px 80px', gap: '6px', padding: '10px 16px', borderBottom: '1px solid #f3f1ea', background: '#fafaf9' }}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#E8541A' }} />
           </div>
-          {['Rule', 'Type', 'Severity', 'Status', 'Table', 'Last Run', 'Actions'].map(h => (
+          {['Rule', 'Type', 'Scope', 'Severity', 'Status', 'Table', 'Last Run', 'Actions'].map(h => (
             <div key={h} style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</div>
           ))}
         </div>
@@ -425,7 +440,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
           const result = testResults[rule.id]
           return (
             <div key={rule.id} style={{
-              display: 'grid', gridTemplateColumns: '36px 1fr 110px 100px 100px 90px 120px 80px', gap: '8px',
+              display: 'grid', gridTemplateColumns: '36px 1fr 110px 70px 100px 100px 100px 100px 80px', gap: '6px',
               padding: '12px 16px', borderBottom: '1px solid #f8f6f0', alignItems: 'center',
               opacity: rule.status === 'archived' || rule.status === 'disabled' ? 0.6 : 1,
               background: selectedIds.has(rule.id) ? '#f0f9ff' : '#fff',
@@ -452,6 +467,15 @@ export default function RulesClient({ initialRules, connections }: Props) {
                 </span>
               </div>
 
+              {/* Scope */}
+              <div>
+                {(rule.scope || 'generic') === 'generic' ? (
+                  <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#f0f9ff', color: '#0369a1', fontSize: '9.5px', fontWeight: 600 }}>🔧</span>
+                ) : (
+                  <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#faf5ff', color: '#7c3aed', fontSize: '9.5px', fontWeight: 600 }}>🎯</span>
+                )}
+              </div>
+
               {/* Severity */}
               <div>
                 <span style={{ background: sev.bg, color: sev.color, padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600 }}>{sev.label}</span>
@@ -464,7 +488,11 @@ export default function RulesClient({ initialRules, connections }: Props) {
 
               {/* Table */}
               <div>
-                <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>{rule.tableName}{rule.columnName ? `.${rule.columnName}` : ''}</span>
+                {rule.tableName === 'ALL_TABLES' ? (
+                  <span style={{ fontSize: '10px', color: '#0369a1', fontWeight: 600, background: '#dbeafe', padding: '2px 6px', borderRadius: '4px' }}>All Tables</span>
+                ) : (
+                  <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>{rule.tableName}{rule.columnName ? `.${rule.columnName}` : ''}</span>
+                )}
               </div>
 
               {/* Last Run */}
@@ -562,6 +590,31 @@ export default function RulesClient({ initialRules, connections }: Props) {
                 </div>
               </div>
 
+              {/* Scope selector */}
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Rule Scope *</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <button type="button" onClick={() => setForm(f => ({ ...f, scope: 'generic' }))} style={{
+                    padding: '12px 10px', borderRadius: '10px', cursor: 'pointer', textAlign: 'left',
+                    border: form.scope === 'generic' ? '2px solid #0369a1' : '1px solid #e2e8f0',
+                    background: form.scope === 'generic' ? '#f0f9ff' : '#fafaf9',
+                  }}>
+                    <div style={{ fontSize: '15px', marginBottom: '4px' }}>🔧</div>
+                    <div style={{ fontSize: '12px', fontWeight: form.scope === 'generic' ? 700 : 500, color: form.scope === 'generic' ? '#0369a1' : '#475569' }}>Generic Rule</div>
+                    <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>Applies across all tables in the schema. No specific table required.</div>
+                  </button>
+                  <button type="button" onClick={() => setForm(f => ({ ...f, scope: 'object-specific' }))} style={{
+                    padding: '12px 10px', borderRadius: '10px', cursor: 'pointer', textAlign: 'left',
+                    border: form.scope === 'object-specific' ? '2px solid #7c3aed' : '1px solid #e2e8f0',
+                    background: form.scope === 'object-specific' ? '#faf5ff' : '#fafaf9',
+                  }}>
+                    <div style={{ fontSize: '15px', marginBottom: '4px' }}>🎯</div>
+                    <div style={{ fontSize: '12px', fontWeight: form.scope === 'object-specific' ? 700 : 500, color: form.scope === 'object-specific' ? '#7c3aed' : '#475569' }}>Object-Specific Rule</div>
+                    <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>Targets a specific table and/or column.</div>
+                  </button>
+                </div>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
                   <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Connection *</label>
@@ -579,12 +632,18 @@ export default function RulesClient({ initialRules, connections }: Props) {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Table *</label>
-                  <input value={form.tableName} onChange={e => setForm(f => ({ ...f, tableName: e.target.value }))} placeholder="schema.table" style={inp()} />
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>
+                    Table {isGeneric ? '' : '*'}
+                    {isGeneric && <span style={{ fontSize: '10px', color: '#0369a1', marginLeft: '6px' }}>(optional — applies to all tables)</span>}
+                  </label>
+                  <input value={form.tableName} onChange={e => setForm(f => ({ ...f, tableName: e.target.value }))}
+                    placeholder={isGeneric ? 'Leave empty for all tables' : 'e.g. CUSTOMERS'}
+                    style={inp(isGeneric ? { background: '#f0f9ff', borderColor: '#bae6fd' } : {})} />
                 </div>
                 <div>
                   <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Column</label>
-                  <input value={form.columnName} onChange={e => setForm(f => ({ ...f, columnName: e.target.value }))} placeholder="email (optional)" style={inp()} />
+                  <input value={form.columnName} onChange={e => setForm(f => ({ ...f, columnName: e.target.value }))}
+                    placeholder={isGeneric ? 'optional' : 'e.g. EMAIL'} style={inp()} />
                 </div>
               </div>
 
@@ -608,11 +667,11 @@ export default function RulesClient({ initialRules, connections }: Props) {
 
               <div style={{ display: 'flex', gap: '10px', paddingTop: '6px' }}>
                 <button onClick={() => setShowModal(false)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
-                <button onClick={save} disabled={saving || !form.name || !form.connectionId || !form.tableName} style={{
+                <button onClick={save} disabled={saving || !canSave} style={{
                   flex: 2, padding: '10px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
-                  cursor: (form.name && form.connectionId && form.tableName) ? 'pointer' : 'not-allowed',
-                  background: (form.name && form.connectionId && form.tableName) ? '#E8541A' : '#e2e8f0',
-                  color: (form.name && form.connectionId && form.tableName) ? '#fff' : '#94a3b8'
+                  cursor: canSave ? 'pointer' : 'not-allowed',
+                  background: canSave ? '#E8541A' : '#e2e8f0',
+                  color: canSave ? '#fff' : '#94a3b8'
                 }}>{saving ? '⏳ Saving...' : '+ Add Rule'}</button>
               </div>
             </div>
