@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Admin utility endpoints — domain data cleanup and platform reset.
 All destructive operations require admin role and log to audit_logs.

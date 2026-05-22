@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -27,7 +29,7 @@ async def create_subdomain(payload: SubdomainCreate, db: AsyncSession = Depends(
 
 @router.get("", response_model=list[SubdomainResponse])
 async def list_subdomains(
-    domain_id: str | None = Query(None),
+    domain_id: Optional[str] = Query(None),
     limit: int = Query(500, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -38,15 +40,15 @@ class UserCreate(BaseModel):
     password: str
     full_name: str
     role: str = "viewer"
-    domain_id: str | None = None
+    domain_id: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
-    full_name: str | None = None
-    role: str | None = None
-    domain_id: str | None = None
-    is_active: bool | None = None
-    password: str | None = None
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    domain_id: Optional[str] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
 
 
 class PasswordChange(BaseModel):

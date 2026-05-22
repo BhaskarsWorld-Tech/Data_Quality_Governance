@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 """
 Service account management — machine-to-machine API key authentication.
 
@@ -28,20 +30,20 @@ _utcnow = lambda: datetime.now(timezone.utc).replace(tzinfo=None)
 
 class SACreate(BaseModel):
     name: str
-    description: str | None = None
+    description: Optional[str] = None
     role: str = "viewer"
-    domain_id: str | None = None
+    domain_id: Optional[str] = None
 
 
 class SAResponse(BaseModel):
     sa_id: str
     name: str
-    description: str | None
+    description: Optional[str]
     role: str
-    domain_id: str | None
+    domain_id: Optional[str]
     is_active: bool
-    created_by: str | None
-    last_used_at: str | None
+    created_by: Optional[str]
+    last_used_at: Optional[str]
     created_at: str
 
 

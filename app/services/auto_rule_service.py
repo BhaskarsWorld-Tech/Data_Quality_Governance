@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Automatic data quality rule creation triggered by discovery and column profiling.
 

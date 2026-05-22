@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import Optional
+
 import asyncio
 import logging
 import uuid
@@ -88,7 +91,7 @@ def _col_to_snapshot_row(c: ColumnMetadata) -> dict:
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
-async def get_active_baseline(asset_id: str, db: AsyncSession) -> SchemaBaseline | None:
+async def get_active_baseline(asset_id: str, db: AsyncSession) -> Optional[SchemaBaseline]:
     result = await db.execute(
         select(SchemaBaseline).where(
             SchemaBaseline.asset_id == asset_id,
@@ -253,7 +256,7 @@ async def approve_baseline(
 
 async def _dispatch_drift_notification(
     alert: DQAlert,
-    asset: DataAsset | None,
+    asset: Optional[DataAsset],
     diff: list[dict],
 ) -> None:
     """Fire-and-forget: send drift alert notifications via existing channels."""

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 """Fernet symmetric encryption for credentials stored in the database.
 
 Usage:
@@ -38,7 +40,7 @@ def _get_fernet():
         return None
 
 
-def encrypt(value: str | None) -> str | None:
+def encrypt(value: Optional[str]) -> Optional[str]:
     """Encrypt a plaintext string. Returns the original if no key is configured."""
     if not value:
         return value
@@ -52,7 +54,7 @@ def encrypt(value: str | None) -> str | None:
         return value
 
 
-def decrypt(value: str | None) -> str | None:
+def decrypt(value: Optional[str]) -> Optional[str]:
     """Decrypt a Fernet-encrypted string.
 
     Gracefully returns the original value if:
@@ -73,7 +75,7 @@ def decrypt(value: str | None) -> str | None:
         return value
 
 
-def is_encrypted(value: str | None) -> bool:
+def is_encrypted(value: Optional[str]) -> bool:
     """True if the value looks like a Fernet token."""
     if not value:
         return False

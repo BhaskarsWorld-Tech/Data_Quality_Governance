@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import json as _json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -568,7 +570,7 @@ async def suggest_glossary_terms(
 @limiter.limit("20/minute")
 async def steward_review_queue(
     request: Request,
-    provider: str | None = None,
+    provider: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):

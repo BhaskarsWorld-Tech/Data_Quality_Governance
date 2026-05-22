@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -9,7 +11,7 @@ from app.core.security import get_current_user
 router = APIRouter(prefix="/contracts", tags=["Contracts"])
 
 
-def _fmt_contract(c: DataContract, asset: DataAsset | None = None) -> dict:
+def _fmt_contract(c: DataContract, asset: Optional[DataAsset] = None) -> dict:
     asset_name = None
     if asset:
         asset_name = f"{asset.sf_schema_name}.{asset.sf_table_name}"
@@ -38,8 +40,8 @@ def _fmt_contract(c: DataContract, asset: DataAsset | None = None) -> dict:
 
 @router.get("")
 async def list_contracts(
-    asset_id: str | None = Query(None),
-    status: str | None = Query(None),
+    asset_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(DataContract, DataAsset).outerjoin(DataAsset, DataContract.asset_id == DataAsset.asset_id)

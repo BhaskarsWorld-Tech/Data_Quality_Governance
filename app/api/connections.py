@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import asyncio
 import re
 import uuid
@@ -37,52 +39,52 @@ class ConnectionCreate(BaseModel):
     connection_name: str
     database_type: str = "snowflake"
     # Snowflake fields
-    account: str | None = None
-    sf_user: str | None = None
-    password: str | None = None
+    account: Optional[str] = None
+    sf_user: Optional[str] = None
+    password: Optional[str] = None
     warehouse: str = "DQ_EXECUTION_WH"
-    role: str | None = None
-    default_database: str | None = None
-    default_schema: str | None = None
-    description: str | None = None
+    role: Optional[str] = None
+    default_database: Optional[str] = None
+    default_schema: Optional[str] = None
+    description: Optional[str] = None
     is_active: bool = True
     connection_type: str = "named"
     is_primary_target: bool = False
     # Multi-database fields
-    host: str | None = None
-    port: int | None = None
-    project: str | None = None
-    key_file: str | None = None
-    connection_string: str | None = None
-    file_path: str | None = None
-    delimiter: str | None = None
-    base_url: str | None = None
-    auth_type: str | None = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    project: Optional[str] = None
+    key_file: Optional[str] = None
+    connection_string: Optional[str] = None
+    file_path: Optional[str] = None
+    delimiter: Optional[str] = None
+    base_url: Optional[str] = None
+    auth_type: Optional[str] = None
 
 
 class ConnectionUpdate(BaseModel):
-    connection_name: str | None = None
-    database_type: str | None = None
-    account: str | None = None
-    sf_user: str | None = None
-    password: str | None = None
-    warehouse: str | None = None
-    role: str | None = None
-    default_database: str | None = None
-    default_schema: str | None = None
-    description: str | None = None
-    is_active: bool | None = None
-    connection_type: str | None = None
-    is_primary_target: bool | None = None
-    host: str | None = None
-    port: int | None = None
-    project: str | None = None
-    key_file: str | None = None
-    connection_string: str | None = None
-    file_path: str | None = None
-    delimiter: str | None = None
-    base_url: str | None = None
-    auth_type: str | None = None
+    connection_name: Optional[str] = None
+    database_type: Optional[str] = None
+    account: Optional[str] = None
+    sf_user: Optional[str] = None
+    password: Optional[str] = None
+    warehouse: Optional[str] = None
+    role: Optional[str] = None
+    default_database: Optional[str] = None
+    default_schema: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    connection_type: Optional[str] = None
+    is_primary_target: Optional[bool] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    project: Optional[str] = None
+    key_file: Optional[str] = None
+    connection_string: Optional[str] = None
+    file_path: Optional[str] = None
+    delimiter: Optional[str] = None
+    base_url: Optional[str] = None
+    auth_type: Optional[str] = None
 
 
 def _mask(conn: SnowflakeConnection) -> dict:
@@ -147,27 +149,27 @@ class ConnectionTestResult(BaseModel):
     success: bool
     status: str  # active | error | inactive
     steps: list[TestStep]
-    error_code: str | None = None
-    error_message: str | None = None
-    suggestion: str | None = None
-    latency_ms: int | None = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    suggestion: Optional[str] = None
+    latency_ms: Optional[int] = None
 
 
 class ConnectionTestCredentials(BaseModel):
-    account: str | None = None
-    sf_user: str | None = None
-    password: str | None = None
+    account: Optional[str] = None
+    sf_user: Optional[str] = None
+    password: Optional[str] = None
     warehouse: str = "DQ_EXECUTION_WH"
-    role: str | None = None
-    default_database: str | None = None
-    default_schema: str | None = None
+    role: Optional[str] = None
+    default_database: Optional[str] = None
+    default_schema: Optional[str] = None
     database_type: str = "snowflake"
-    host: str | None = None
-    port: int | None = None
-    project: str | None = None
-    connection_string: str | None = None
-    file_path: str | None = None
-    base_url: str | None = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    project: Optional[str] = None
+    connection_string: Optional[str] = None
+    file_path: Optional[str] = None
+    base_url: Optional[str] = None
 
 
 def _test_snowflake_sync(payload) -> dict:
@@ -396,7 +398,7 @@ async def create_connection(
 async def list_connections(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
-    database_type: str | None = None,
+    database_type: Optional[str] = None,
 ):
     stmt = select(SnowflakeConnection).order_by(SnowflakeConnection.connection_name)
     if database_type:

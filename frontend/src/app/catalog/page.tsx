@@ -1,389 +1,295 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
-import { Search, Loader2, LayoutGrid, List, SlidersHorizontal, Database, Tag, BookOpen, Package, LayoutList } from 'lucide-react'
-import clsx from 'clsx'
-import { catalogApi } from '@/services/apiClient'
-import { useCurrentUser } from '@/hooks/useCurrentUser'
-import CatalogFacets from '@/components/catalog/CatalogFacets'
-import CatalogResultCard, { type CatalogItem } from '@/components/catalog/CatalogResultCard'
-import CatalogResultRow from '@/components/catalog/CatalogResultRow'
-import QuickFilters from '@/components/catalog/QuickFilters'
-import SavedSearches from '@/components/catalog/SavedSearches'
-import HowItWorks from '@/components/common/HowItWorks'
+import { useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface Facets {
-  domains: { id: string; name: string; count: number }[]
-  classifications: { value: string; count: number }[]
-  certifications: { value: string; count: number }[]
-  tags: { name: string; count: number }[]
+type Issue = { rule: string; severity: 'critical' | 'warning' | 'info'; detail: string; impact: string }
+type Asset = {
+  id: string; name: string; schema: string; type: string; domain: string
+  owner: string; score: number; columns: number; rows: string; tags: string[]
+  connection: string; updated: string; desc: string; issues: Issue[]
 }
 
-interface SearchResponse {
-  results: CatalogItem[]
-  total: number
-  page: number
-  page_size: number
-}
-
-// ── Skeleton ──────────────────────────────────────────────────────────────────
-
-function SkeletonCard() {
-  return (
-    <div className="animate-pulse bg-white rounded-xl border border-gray-200 p-4">
-      <div className="flex gap-3">
-        <div className="w-10 h-10 bg-gray-200 rounded-full shrink-0" />
-        <div className="flex-1 space-y-2">
-          <div className="h-4 bg-gray-200 rounded w-1/2" />
-          <div className="h-3 bg-gray-100 rounded w-3/4" />
-          <div className="h-3 bg-gray-100 rounded w-1/3" />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Sort options ──────────────────────────────────────────────────────────────
-
-const SORT_OPTIONS = [
-  { value: 'relevance',        label: 'Relevance' },
-  { value: 'quality',          label: 'Quality Score' },
-  { value: 'trust',            label: 'Trust Score' },
-  { value: 'alphabetical',     label: 'A → Z' },
-  { value: 'alphabetical_desc',label: 'Z → A' },
-  { value: 'updated',          label: 'Last Updated' },
+const assets: Asset[] = [
+  {
+    id: 'c1', name: 'fact_orders', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Finance',
+    owner: 'Bhaskar R.', score: 94, columns: 28, rows: '4.2M', tags: ['core', 'revenue'],
+    connection: 'SF_Codex', updated: '2026-05-05 12:00',
+    desc: 'Central orders fact table with line-item revenue, discounts, and fulfillment status.',
+    issues: [
+      { rule: 'Revenue > 0 Validity', severity: 'warning', detail: '8,400 records (0.2%) have revenue ≤ 0', impact: 'Minor revenue calculation skew in finance reports' },
+      { rule: 'Freshness Check', severity: 'info', detail: 'Table refreshed 12 min ago — within SLA', impact: 'No impact' },
+    ],
+  },
+  {
+    id: 'c2', name: 'dim_customers', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Marketing',
+    owner: 'Priya M.', score: 81, columns: 19, rows: '1.1M', tags: ['pii', 'customer'],
+    connection: 'SF_Codex', updated: '2026-05-05 08:00',
+    desc: 'Customer master dimension with contact info, segment, and lifetime value.',
+    issues: [
+      { rule: 'Email Format Check', severity: 'critical', detail: '220,000 records (20%) have invalid email format — regex [a-z]+@[a-z]+\\.[a-z]+ fails', impact: 'Email campaigns will bounce; marketing attribution broken' },
+      { rule: 'Consent Flag Completeness', severity: 'warning', detail: '143,000 records (13%) missing GDPR consent flag', impact: 'Compliance risk — cannot lawfully market to these users' },
+      { rule: 'Customer ID Uniqueness', severity: 'info', detail: 'All 1.1M customer IDs are unique', impact: 'No impact' },
+    ],
+  },
+  {
+    id: 'c3', name: 'fact_inventory', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Supply Chain',
+    owner: 'Rajan S.', score: 76, columns: 14, rows: '820K', tags: ['ops'],
+    connection: 'SF_Codex', updated: '2026-05-04 23:00',
+    desc: 'Real-time inventory levels, reorder points, and warehouse locations.',
+    issues: [
+      { rule: 'Stock Level ≥ 0', severity: 'critical', detail: '4,100 SKUs (0.5%) show negative stock — likely unmatched returns', impact: 'Incorrect reorder signals; potential over-ordering costing ~$240K' },
+      { rule: 'Warehouse Code Valid', severity: 'critical', detail: '12 records reference warehouse code "WH-999" which does not exist in dim_warehouses', impact: 'Broken joins cause NULL warehouse in downstream reports' },
+      { rule: 'Freshness SLA', severity: 'warning', detail: 'Last refresh was 23h ago — SLA requires every 4 hours', impact: 'Inventory decisions based on stale data; stockout risk elevated' },
+    ],
+  },
+  {
+    id: 'c4', name: 'fact_payments', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Finance',
+    owner: 'Bhaskar R.', score: 62, columns: 22, rows: '3.8M', tags: ['core', 'pci'],
+    connection: 'SF_Codex', updated: '2026-05-04 18:00',
+    desc: 'Payment transactions including method, gateway, and settlement status.',
+    issues: [
+      { rule: 'Payment Amount NOT NULL', severity: 'critical', detail: '1,482,000 records (39%) have NULL payment_amount — column was dropped in last migration', impact: 'Finance reconciliation completely broken; revenue reports understated by ~$12M' },
+      { rule: 'Schema Change Detected', severity: 'critical', detail: 'Column "amount_usd" removed 2026-05-04 18:00 — 2 downstream dbt models broken', impact: 'revenue_by_channel view returning stale data; BI dashboards showing 0 for USD amounts' },
+      { rule: 'Duplicate Transaction IDs', severity: 'critical', detail: '3,200 duplicate transaction_id values detected', impact: 'Double-counting payments in settlement reports; audit risk' },
+      { rule: 'Freshness Check', severity: 'warning', detail: 'Last updated 18h ago — SLA is 6h', impact: 'Same-day payment reconciliation not possible' },
+    ],
+  },
+  {
+    id: 'c5', name: 'web_sessions', schema: 'CODEX.ANALYTICS', type: 'Table', domain: 'Marketing',
+    owner: 'Priya M.', score: 88, columns: 31, rows: '9.5M', tags: ['clickstream'],
+    connection: 'SF_Codex', updated: '2026-05-05 06:00',
+    desc: 'Web session events from GA4 with UTM attribution and funnel steps.',
+    issues: [
+      { rule: 'Session Duration Check', severity: 'warning', detail: '190,000 sessions (2%) have duration > 8h — likely bot traffic or tab abandonment', impact: 'Inflates average session duration metric by ~12 min' },
+      { rule: 'UTM Source Completeness', severity: 'info', detail: '4% of sessions missing utm_source — expected for direct traffic', impact: 'Minor attribution gap — within acceptable threshold' },
+      { rule: 'User ID Format', severity: 'info', detail: 'All user IDs match GA4 UUID format', impact: 'No impact' },
+    ],
+  },
+  {
+    id: 'c6', name: 'dim_products', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Catalog',
+    owner: 'Anil K.', score: 91, columns: 18, rows: '45K', tags: ['catalog'],
+    connection: 'SF_Codex', updated: '2026-05-03 14:00',
+    desc: 'Product catalog with SKU, category hierarchy, pricing, and availability.',
+    issues: [
+      { rule: 'SKU Uniqueness', severity: 'info', detail: 'All 45K SKUs are unique', impact: 'No impact' },
+      { rule: 'Price > 0', severity: 'info', detail: 'All products have valid positive price', impact: 'No impact' },
+      { rule: 'Category Completeness', severity: 'warning', detail: '420 products (0.9%) missing sub-category — recently added SKUs', impact: 'Faceted search returns incomplete results for sub-category filters' },
+    ],
+  },
+  {
+    id: 'c7', name: 'revenue_by_channel', schema: 'CODEX.ANALYTICS', type: 'View', domain: 'Finance',
+    owner: 'Bhaskar R.', score: 97, columns: 8, rows: '—', tags: ['aggregated', 'core'],
+    connection: 'SF_Codex', updated: '2026-05-05 12:00',
+    desc: 'Aggregated revenue view grouped by sales channel and date.',
+    issues: [
+      { rule: 'Aggregation Consistency', severity: 'info', detail: 'View totals match source fact_orders within 0.01%', impact: 'No impact' },
+      { rule: 'Freshness', severity: 'info', detail: 'Refreshed 12 min ago — up to date', impact: 'No impact' },
+    ],
+  },
+  {
+    id: 'c8', name: 'customer_ltv', schema: 'CODEX.ML', type: 'ML Table', domain: 'Marketing',
+    owner: 'Priya M.', score: 84, columns: 12, rows: '1.1M', tags: ['ml', 'customer'],
+    connection: 'SF_Codex', updated: '2026-05-05 02:00',
+    desc: 'Customer lifetime value predictions from XGBoost model, refreshed daily.',
+    issues: [
+      { rule: 'LTV Score Range', severity: 'warning', detail: '8,200 customers (0.7%) have LTV score > $50K — statistical outliers from data leakage', impact: 'High-value segment over-inflated; paid acquisition targeting skewed' },
+      { rule: 'Prediction Coverage', severity: 'warning', detail: '32,000 customers (2.9%) have no LTV prediction — new sign-ups in last 24h', impact: 'New customers excluded from personalization until next daily refresh' },
+      { rule: 'Model Staleness', severity: 'info', detail: 'Model retrained 6 days ago — within 7-day SLA', impact: 'No impact' },
+    ],
+  },
+  {
+    id: 'c9', name: 'fact_returns', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Operations',
+    owner: 'Rajan S.', score: 79, columns: 16, rows: '290K', tags: ['ops'],
+    connection: 'SF_Codex', updated: '2026-05-05 10:00',
+    desc: 'Return and refund transactions with reason codes and SLA tracking.',
+    issues: [
+      { rule: 'Return Reason Code Valid', severity: 'critical', detail: '6,800 records (2.3%) have reason_code "UNKNOWN" — mapping table outdated', impact: 'Operations team cannot categorise returns; SLA tracking broken for these cases' },
+      { rule: 'Refund Amount ≤ Order Amount', severity: 'critical', detail: '140 records have refund_amount > original order_amount — data entry error', impact: 'Finance overpaying refunds — estimated excess ~$28K' },
+      { rule: 'SLA Breach Detection', severity: 'warning', detail: '920 returns exceeded 5-day resolution SLA', impact: 'Customer satisfaction risk; SLA penalty exposure' },
+    ],
+  },
 ]
 
-const ENTITY_TYPES = [
-  { value: undefined,      label: 'All',           icon: <LayoutList size={13} /> },
-  { value: 'asset',        label: 'Tables',         icon: <Database   size={13} /> },
-  { value: 'glossary',     label: 'Glossary Terms', icon: <BookOpen   size={13} /> },
-  { value: 'data_product', label: 'Data Products',  icon: <Package    size={13} /> },
-]
+function scoreColor(s: number) { return s >= 90 ? '#16a34a' : s >= 80 ? '#ca8a04' : '#dc2626' }
+function scoreBg(s: number)    { return s >= 90 ? '#f0fdf4'  : s >= 80 ? '#fefce8'  : '#fee2e2' }
+function statusLabel(s: number) { return s >= 90 ? 'Healthy' : s >= 80 ? 'At Risk' : 'Critical' }
 
-// ── Pagination ────────────────────────────────────────────────────────────────
-
-function Pagination({ page, total, pageSize, onChange }: {
-  page: number; total: number; pageSize: number; onChange: (p: number) => void
-}) {
-  const totalPages = Math.ceil(total / pageSize)
-  if (totalPages <= 1) return null
-  const pages = Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-    const p = page <= 3 ? i + 1 : page - 2 + i
-    return p >= 1 && p <= totalPages ? p : null
-  }).filter(Boolean) as number[]
-
-  return (
-    <div className="flex items-center justify-center gap-1 mt-6">
-      <button onClick={() => onChange(page - 1)} disabled={page <= 1}
-        className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">
-        Prev
-      </button>
-      {pages.map(p => (
-        <button key={p} onClick={() => onChange(p)}
-          className={clsx('px-3 py-1.5 text-sm rounded-lg border transition-colors',
-            p === page ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-200 hover:bg-gray-50')}>
-          {p}
-        </button>
-      ))}
-      <button onClick={() => onChange(page + 1)} disabled={page >= totalPages}
-        className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 disabled:opacity-40 hover:bg-gray-50">
-        Next
-      </button>
-    </div>
-  )
+const sevCfg = {
+  critical: { bg: '#fee2e2', color: '#dc2626', dot: '#dc2626', label: 'Critical' },
+  warning:  { bg: '#fef9c3', color: '#ca8a04', dot: '#ca8a04', label: 'Warning'  },
+  info:     { bg: '#f0f9ff', color: '#0284c7', dot: '#0284c7', label: 'Passing'  },
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+type Filter = 'all' | 'healthy' | 'at-risk' | 'critical'
 
 export default function CatalogPage() {
-  const searchParams = useSearchParams()
-  const router       = useRouter()
-  const user         = useCurrentUser()
+  const [search, setSearch]   = useState('')
+  const [domain, setDomain]   = useState('all')
+  const [filter, setFilter]   = useState<Filter>('all')
+  const [selected, setSelected] = useState<Asset | null>(null)
 
-  const [query,    setQuery]    = useState(searchParams.get('q') ?? '')
-  const [sort,     setSort]     = useState(searchParams.get('sort') ?? 'relevance')
-  const [viewMode, setViewMode] = useState<'card' | 'table'>(
-    (searchParams.get('view') as 'card' | 'table') ?? 'card'
-  )
-  const [page, setPage] = useState(Number(searchParams.get('page') ?? 1))
-  const [filters, setFilters] = useState<Record<string, string | undefined>>({
-    type:           searchParams.get('type')           ?? undefined,
-    domain_id:      searchParams.get('domain_id')      ?? undefined,
-    classification: searchParams.get('classification') ?? undefined,
-    certification:  searchParams.get('certification')  ?? undefined,
-    owner:          searchParams.get('owner')          ?? undefined,
-    tag:            searchParams.get('tag')            ?? undefined,
+  const domains = ['all', ...Array.from(new Set(assets.map(a => a.domain)))]
+
+  const healthy  = assets.filter(a => a.score >= 90)
+  const atRisk   = assets.filter(a => a.score >= 80 && a.score < 90)
+  const critical = assets.filter(a => a.score < 80)
+
+  const filtered = assets.filter(a => {
+    if (filter === 'healthy'  && a.score < 90) return false
+    if (filter === 'at-risk'  && (a.score < 80 || a.score >= 90)) return false
+    if (filter === 'critical' && a.score >= 80) return false
+    if (domain !== 'all' && a.domain !== domain) return false
+    if (search && !a.name.includes(search) && !a.desc.toLowerCase().includes(search.toLowerCase()) && !a.tags.some(t => t.includes(search))) return false
+    return true
   })
 
-  const [results,        setResults]        = useState<CatalogItem[]>([])
-  const [total,          setTotal]          = useState(0)
-  const [facets,         setFacets]         = useState<Facets>({ domains: [], classifications: [], certifications: [], tags: [] })
-  const [loading,        setLoading]        = useState(false)
-  const [facetLoading,   setFacetLoading]   = useState(true)
-  const [popular,        setPopular]        = useState<CatalogItem[]>([])
-  const [popularLoading, setPopularLoading] = useState(true)
-  const [hasSearched,    setHasSearched]    = useState(!!searchParams.get('q'))
-  const [featuredPage,   setFeaturedPage]   = useState(1)
-  const FEATURED_PAGE_SIZE = 10
-
-  // -- Sync all state → URL on any change -------------------------------------
-  useEffect(() => {
-    const params = new URLSearchParams()
-    if (query)    params.set('q',    query)
-    if (sort && sort !== 'relevance') params.set('sort', sort)
-    if (viewMode && viewMode !== 'card') params.set('view', viewMode)
-    if (page > 1) params.set('page', String(page))
-    Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v) })
-    const newUrl = `/catalog${params.toString() ? `?${params.toString()}` : ''}`
-    router.replace(newUrl, { scroll: false })
-  }, [query, sort, viewMode, page, filters, router])
-
-  // -- Load popular on mount ---------------------------------------------------
-  useEffect(() => {
-    catalogApi.popular()
-      .then(r => setPopular(Array.isArray(r.data) ? r.data : []))
-      .catch(() => setPopular([]))
-      .finally(() => setPopularLoading(false))
-  }, [])
-
-  // -- Load facets independently -----------------------------------------------
-  useEffect(() => {
-    setFacetLoading(true)
-    const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v != null))
-    catalogApi.facets(params)
-      .then(r => setFacets(r.data))
-      .catch(() => {})
-      .finally(() => setFacetLoading(false))
-  }, [filters])
-
-  // -- Debounced search -------------------------------------------------------
-  useEffect(() => {
-    const hasFilters = Object.values(filters).some(v => v != null)
-    if (!query.trim() && !hasFilters) {
-      setHasSearched(false)
-      setResults([])
-      return
-    }
-    const timer = setTimeout(async () => {
-      setLoading(true)
-      setHasSearched(true)
-      try {
-        const params: Record<string, string | number> = { sort, page, page_size: 20 }
-        if (query.trim()) params.q = query
-        Object.entries(filters).forEach(([k, v]) => { if (v) params[k] = v })
-        const res = await catalogApi.search(params)
-        const body: SearchResponse = res.data
-        setResults(body.results ?? [])
-        setTotal(body.total ?? 0)
-      } catch {
-        setResults([])
-        setTotal(0)
-      } finally {
-        setLoading(false)
-      }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [query, sort, page, filters])
-
-  // -- Handlers ---------------------------------------------------------------
-  const handleFilterChange = (key: string, value: string | undefined) => {
-    setPage(1)
-    setFilters(prev => ({ ...prev, [key]: value }))
-  }
-
-  const handleLoadSaved = (q: string, savedFilters: Record<string, string>) => {
-    setQuery(q)
-    setFilters(f => ({ ...f, ...savedFilters }))
-    setPage(1)
-  }
-
-  // suppress unused warning for facetLoading
-  void facetLoading
+  const statCards = [
+    { key: 'all'      as Filter, label: 'Total Assets',   value: assets.length,    icon: '📦', color: '#475569', border: '#e2e8f0', activeBg: '#f8fafc'  },
+    { key: 'healthy'  as Filter, label: 'Healthy (≥90)',  value: healthy.length,   icon: '✅', color: '#16a34a', border: '#bbf7d0', activeBg: '#f0fdf4'  },
+    { key: 'at-risk'  as Filter, label: 'At Risk (80–89)',value: atRisk.length,    icon: '⚠️', color: '#ca8a04', border: '#fde68a', activeBg: '#fefce8'  },
+    { key: 'critical' as Filter, label: 'Critical (<80)', value: critical.length,  icon: '❌', color: '#dc2626', border: '#fca5a5', activeBg: '#fee2e2'  },
+  ]
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold text-gray-900">Data Catalog</h1>
-        <p className="text-gray-500 text-sm mt-1">Search across assets, glossary terms, and data products</p>
-      </div>
-
-      <HowItWorks
-        storageKey="catalog"
-        title="How Data Catalog Works"
-        steps={[
-          { icon: <Database size={13} />, title: 'Register Tables',    description: 'Add Snowflake tables as data assets under a domain.' },
-          { icon: <Search   size={13} />, title: 'Search & Discover',  description: 'Full-text search across assets, glossary terms, and data products.' },
-          { icon: <SlidersHorizontal size={13} />, title: 'Filter & Sort', description: 'Narrow by domain, classification, certification, or tag.' },
-          { icon: <Tag      size={13} />, title: 'View Details',       description: 'Click any result to see quality scores, lineage, and certifications.' },
-        ]}
-      />
-
-      {/* Search bar row */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="relative flex-1">
-          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search assets, glossary terms, data products..."
-            value={query}
-            onChange={e => { setQuery(e.target.value); setPage(1) }}
-            className="w-full pl-11 pr-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-sm"
-          />
-          {loading && <Loader2 size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" />}
+    <div style={{ padding: '28px 36px', maxWidth: selected ? '1100px' : '1300px', display: 'flex', gap: '24px' }}>
+      {/* Left panel */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Analytics platform</span></div>
+        <div style={{ marginBottom: '24px' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Data Catalog</h1>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>
+            {filtered.length} of {assets.length} assets · {filter !== 'all' ? statCards.find(s => s.key === filter)?.label : 'all domains'}
+          </p>
         </div>
 
-        <select value={sort} onChange={e => { setSort(e.target.value); setPage(1) }}
-          className="border border-gray-200 rounded-xl px-3 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-          {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-
-        <div className="flex border border-gray-200 rounded-xl overflow-hidden">
-          <button onClick={() => setViewMode('card')}
-            className={clsx('p-2.5', viewMode === 'card' ? 'bg-blue-600 text-white' : 'bg-white text-gray-400 hover:bg-gray-50')}>
-            <LayoutGrid size={16} />
-          </button>
-          <button onClick={() => setViewMode('table')}
-            className={clsx('p-2.5', viewMode === 'table' ? 'bg-blue-600 text-white' : 'bg-white text-gray-400 hover:bg-gray-50')}>
-            <List size={16} />
-          </button>
+        {/* Clickable stat cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>
+          {statCards.map(s => {
+            const active = filter === s.key
+            return (
+              <button key={s.key} onClick={() => setFilter(active ? 'all' : s.key)} style={{
+                background: active ? s.activeBg : '#fff',
+                border: `2px solid ${active ? s.border : '#ebe8df'}`,
+                borderRadius: '12px', padding: '16px 20px', cursor: 'pointer',
+                textAlign: 'left', transition: 'all 0.15s',
+                boxShadow: active ? `0 0 0 3px ${s.border}40` : 'none',
+              }}>
+                <div style={{ fontSize: '22px', marginBottom: '6px' }}>{s.icon}</div>
+                <div style={{ fontSize: '26px', fontWeight: 800, color: active ? s.color : '#1a1a1a' }}>{s.value}</div>
+                <div style={{ fontSize: '12px', color: active ? s.color : '#64748b', fontWeight: active ? 600 : 400, marginTop: '2px' }}>{s.label}</div>
+                {active && <div style={{ fontSize: '10px', color: s.color, marginTop: '4px', fontWeight: 600 }}>▲ Filtered</div>}
+              </button>
+            )
+          })}
         </div>
 
-        <SavedSearches currentQuery={query} currentFilters={filters} onLoad={handleLoadSaved} />
-      </div>
+        {/* Filters */}
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search assets, tags, descriptions…"
+            style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', background: '#fafaf9', color: '#0f172a' }} />
+          <select value={domain} onChange={e => setDomain(e.target.value)}
+            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', background: '#fafaf9', color: '#475569' }}>
+            {domains.map(d => <option key={d} value={d}>{d === 'all' ? 'All Domains' : d}</option>)}
+          </select>
+        </div>
 
-      {/* Quick filters */}
-      <QuickFilters activeFilters={filters} userEmail={user?.email ?? ''} onChange={handleFilterChange} />
-
-      {/* Entity type tabs */}
-      <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
-        {ENTITY_TYPES.map(et => {
-          const active = filters.type === et.value
-          return (
-            <button
-              key={et.value ?? 'all'}
-              onClick={() => handleFilterChange('type', active ? undefined : et.value)}
-              className={clsx(
-                'flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium border-b-2 -mb-px transition-colors',
-                active
-                  ? 'border-blue-600 text-blue-700'
-                  : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
-              )}
-            >
-              {et.icon}{et.label}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Two-column layout */}
-      <div className="flex gap-6">
-        <CatalogFacets
-          facets={facets}
-          filters={{
-            domain_id:      filters.domain_id,
-            classification: filters.classification,
-            certification:  filters.certification,
-            tag:            filters.tag,
-          }}
-          onChange={(key, value) => handleFilterChange(key, value)}
-        />
-
-        <div className="flex-1 min-w-0">
-          {hasSearched ? (
-            loading ? (
-              <div className={viewMode === 'card' ? 'grid grid-cols-1 lg:grid-cols-2 gap-3' : 'space-y-2'}>
-                {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
-              </div>
-            ) : results.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24">
-                <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
-                  <Search size={28} className="text-gray-400" />
-                </div>
-                <p className="text-base font-semibold text-gray-800">No results found</p>
-                <p className="text-sm text-gray-400 mt-1">Try a different search term or filter</p>
-              </div>
-            ) : (
-              <>
-                <p className="text-xs text-gray-500 mb-3">
-                  {total} result{total !== 1 ? 's' : ''}{query ? ` for "${query}"` : ''}
-                </p>
-                {viewMode === 'card' ? (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    {results.map(item => <CatalogResultCard key={item.id} item={item} />)}
+        {/* Asset cards */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {filtered.length === 0 && (
+            <div style={{ background: '#fff', border: '2px dashed #e2e8f0', borderRadius: '12px', padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+              No assets match the current filter
+            </div>
+          )}
+          {filtered.map(a => {
+            const isSelected = selected?.id === a.id
+            const criticalCount  = a.issues.filter(i => i.severity === 'critical').length
+            const warningCount   = a.issues.filter(i => i.severity === 'warning').length
+            return (
+              <div key={a.id} onClick={() => setSelected(isSelected ? null : a)} style={{
+                background: '#fff',
+                border: `1.5px solid ${isSelected ? '#6366f1' : a.score < 80 ? '#fca5a5' : a.score < 90 ? '#fde68a' : '#d1fae5'}`,
+                borderRadius: '14px', padding: '18px 20px', cursor: 'pointer',
+                boxShadow: isSelected ? '0 0 0 3px rgba(99,102,241,0.15)' : '0 1px 3px rgba(0,0,0,0.04)',
+                transition: 'all 0.15s',
+              }}>
+                {/* Header row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '14px' }}>{a.name}</span>
+                      <span style={{ background: scoreBg(a.score), color: scoreColor(a.score), fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>{statusLabel(a.score)}</span>
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px' }}>{a.schema} · {a.type} · {a.domain}</div>
                   </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-gray-100 bg-gray-50">
-                          {['Name', 'Type', 'Domain', 'Owner', 'Quality', 'Certification', 'Rating'].map(h => (
-                            <th key={h} className="text-left text-xs font-semibold text-gray-500 px-3 py-2">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {results.map(item => <CatalogResultRow key={item.id} item={item} />)}
-                      </tbody>
-                    </table>
+                  <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '16px' }}>
+                    <div style={{ fontSize: '26px', fontWeight: 800, color: scoreColor(a.score), lineHeight: 1 }}>{a.score}</div>
+                    <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>quality score</div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '12.5px', color: '#475569', marginBottom: '12px', lineHeight: '1.55' }}>{a.desc}</div>
+
+                {/* Issue summary pills */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                  {criticalCount > 0 && (
+                    <span style={{ background: '#fee2e2', color: '#dc2626', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
+                      ❌ {criticalCount} critical issue{criticalCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {warningCount > 0 && (
+                    <span style={{ background: '#fef9c3', color: '#ca8a04', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
+                      ⚠️ {warningCount} warning{warningCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {criticalCount === 0 && warningCount === 0 && (
+                    <span style={{ background: '#f0fdf4', color: '#16a34a', padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
+                      ✓ All checks passing
+                    </span>
+                  )}
+                  {a.tags.map(t => <span key={t} style={{ background: '#f1f5f9', color: '#475569', padding: '3px 8px', borderRadius: '20px', fontSize: '11px' }}>{t}</span>)}
+                </div>
+
+                {/* Inline issues when selected */}
+                {isSelected && (
+                  <div style={{ marginTop: '14px', borderTop: '1px solid #f1f5f9', paddingTop: '14px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Quality Check Details</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {a.issues.map((issue, idx) => {
+                        const cfg = sevCfg[issue.severity]
+                        return (
+                          <div key={idx} style={{ background: cfg.bg, borderRadius: '10px', padding: '12px 14px', border: `1px solid ${cfg.color}30` }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                              <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
+                              <span style={{ fontWeight: 700, fontSize: '12.5px', color: cfg.color }}>{cfg.label}</span>
+                              <span style={{ fontWeight: 600, fontSize: '12.5px', color: '#1a1a1a', flex: 1 }}>{issue.rule}</span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#374151', marginBottom: '5px', paddingLeft: '15px' }}>{issue.detail}</div>
+                            <div style={{ fontSize: '11.5px', color: '#6b7280', paddingLeft: '15px' }}>
+                              <strong style={{ color: '#374151' }}>Impact:</strong> {issue.impact}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Metadata footer */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px', marginTop: '12px' }}>
+                      {[['Owner', `👤 ${a.owner}`], ['Rows / Cols', `${a.rows} · ${a.columns} cols`], ['Last Updated', a.updated]].map(([k, v]) => (
+                        <div key={k} style={{ background: '#f8fafc', borderRadius: '8px', padding: '8px 10px' }}>
+                          <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', marginBottom: '2px' }}>{k}</div>
+                          <div style={{ fontSize: '12px', color: '#1a1a1a', fontWeight: 500 }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
-                <Pagination page={page} total={total} pageSize={20}
-                  onChange={p => setPage(p)} />
-              </>
-            )
-          ) : (
-            popularLoading ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
-              </div>
-            ) : popular.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24">
-                <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
-                  <Database size={28} className="text-gray-400" />
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', color: '#94a3b8', borderTop: '1px solid #f3f1ea', paddingTop: '10px', marginTop: isSelected ? '12px' : '0' }}>
+                  <span>🔗 {a.connection}</span>
+                  <span style={{ color: '#6366f1', fontWeight: 500 }}>{isSelected ? '▲ Click to collapse' : '▼ Click for details'}</span>
                 </div>
-                <p className="text-base font-semibold text-gray-800">No data assets registered yet</p>
-                <p className="text-sm text-gray-400 mt-1">Register your first Snowflake table to get started</p>
-                <a href="/assets" className="mt-4 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-                  Register your first table →
-                </a>
-              </div>
-            ) : (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-xs font-semibold text-gray-700">
-                    {popular.some(p => (p as any).usage_count > 0) ? 'Popular Assets' : 'Featured Assets'}
-                  </h2>
-                  <span className="text-xs text-gray-400">{popular.length} assets</span>
-                </div>
-                <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-gray-100 bg-gray-50">
-                        {['Name', 'Type', 'Domain', 'Owner', 'Quality', 'Certification', 'Rating'].map(h => (
-                          <th key={h} className="text-left text-[11px] font-semibold text-gray-500 px-3 py-2">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {popular
-                        .slice((featuredPage - 1) * FEATURED_PAGE_SIZE, featuredPage * FEATURED_PAGE_SIZE)
-                        .map(item => <CatalogResultRow key={item.id} item={item} />)}
-                    </tbody>
-                  </table>
-                </div>
-                <Pagination
-                  page={featuredPage}
-                  total={popular.length}
-                  pageSize={FEATURED_PAGE_SIZE}
-                  onChange={p => setFeaturedPage(p)}
-                />
               </div>
             )
-          )}
+          })}
         </div>
       </div>
     </div>

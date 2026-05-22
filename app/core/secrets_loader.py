@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Secrets bootstrap — load sensitive config from external secret stores at startup.
 

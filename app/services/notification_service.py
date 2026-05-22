@@ -1,3 +1,4 @@
+from __future__ import annotations
 import logging
 import asyncio
 from typing import Optional
@@ -6,7 +7,7 @@ from app.core.config import settings
 logger = logging.getLogger("dq_platform.notifications")
 
 
-async def send_slack_notification(webhook_url: str, message: str, blocks: list | None = None) -> bool:
+async def send_slack_notification(webhook_url: str, message: str, blocks: Optional[list] = None) -> bool:
     """Send a Slack notification via incoming webhook."""
     if not webhook_url:
         return False
@@ -29,7 +30,7 @@ async def send_email_notification(
     to_emails: list[str],
     subject: str,
     body_html: str,
-    body_text: str | None = None,
+    body_text: Optional[str] = None,
 ) -> bool:
     """Send an email notification via SMTP."""
     if not settings.smtp_host or not to_emails:
@@ -69,7 +70,7 @@ def _build_slack_alert_blocks(
     alert_message: str,
     domain_name: str = "",
     asset_name: str = "",
-    failure_pct: float | None = None,
+    failure_pct: Optional[float] = None,
 ) -> list:
     severity_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(severity, "⚪")
     header = f"{severity_emoji} *DQ Alert [{severity.upper()}]* — {rule_name}"
@@ -99,7 +100,7 @@ def _build_email_alert_html(
     alert_message: str,
     domain_name: str = "",
     asset_name: str = "",
-    failure_pct: float | None = None,
+    failure_pct: Optional[float] = None,
 ) -> str:
     severity_color = {"critical": "#dc2626", "high": "#ea580c", "medium": "#ca8a04", "low": "#16a34a"}.get(severity, "#6b7280")
     rows = ""
@@ -163,7 +164,7 @@ async def send_pagerduty_notification(
     summary: str,
     severity: str,
     source: str = "DQ Platform",
-    dedup_key: str | None = None,
+    dedup_key: Optional[str] = None,
 ) -> bool:
     """Send a PagerDuty alert via Events API v2."""
     if not integration_key:
@@ -213,12 +214,12 @@ async def dispatch_alert(
     alert_message: str,
     domain_name: str = "",
     asset_name: str = "",
-    failure_pct: float | None = None,
-    extra_emails: list[str] | None = None,
-    slack_channel_webhook: str | None = None,
-    teams_webhook: str | None = None,
-    pagerduty_key: str | None = None,
-    custom_webhook: str | None = None,
+    failure_pct: Optional[float] = None,
+    extra_emails: Optional[list[str]] = None,
+    slack_channel_webhook: Optional[str] = None,
+    teams_webhook: Optional[str] = None,
+    pagerduty_key: Optional[str] = None,
+    custom_webhook: Optional[str] = None,
 ) -> dict:
     """Dispatch alert via all configured channels. Returns dict of channel results."""
     results = {"slack": False, "email": False, "teams": False, "pagerduty": False, "webhook": False}

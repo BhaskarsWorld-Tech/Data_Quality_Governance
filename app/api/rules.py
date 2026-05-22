@@ -1,3 +1,4 @@
+from __future__ import annotations
 import uuid
 import yaml
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File
@@ -56,12 +57,12 @@ async def preview_sql(payload: PreviewSQLRequest, db: AsyncSession = Depends(get
 
 @router.get("/enriched")
 async def list_rules_enriched(
-    domain_id: str | None = Query(None),
-    subdomain_id: str | None = Query(None),
-    asset_id: str | None = Query(None),
-    severity: str | None = Query(None),
-    status: str | None = Query(None),
-    search: str | None = Query(None),
+    domain_id: Optional[str] = Query(None),
+    subdomain_id: Optional[str] = Query(None),
+    asset_id: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -148,12 +149,12 @@ async def create_rule(payload: RuleCreate, db: AsyncSession = Depends(get_db), u
 
 @router.get("")
 async def list_rules(
-    domain_id: str | None = Query(None),
-    subdomain_id: str | None = Query(None),
-    asset_id: str | None = Query(None),
-    rule_type: str | None = Query(None),
-    severity: str | None = Query(None),
-    is_active: bool | None = Query(None),
+    domain_id: Optional[str] = Query(None),
+    subdomain_id: Optional[str] = Query(None),
+    asset_id: Optional[str] = Query(None),
+    rule_type: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db)
@@ -180,7 +181,7 @@ async def list_rules(
 
 
 @router.get("/export")
-async def export_rules(domain_id: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+async def export_rules(domain_id: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)):
     q = select(DQRule)
     if domain_id:
         q = q.where(DQRule.domain_id == domain_id)
@@ -270,7 +271,7 @@ async def get_rule(rule_id: str, db: AsyncSession = Depends(get_db)):
     return rule
 
 
-async def _snapshot_rule_version(db: AsyncSession, rule: DQRule, changed_by: str | None, change_reason: str | None = None) -> None:
+async def _snapshot_rule_version(db: AsyncSession, rule: DQRule, changed_by: Optional[str], change_reason: Optional[str] = None) -> None:
     """Save an immutable snapshot of the rule before updating it."""
     snapshot = RuleVersion(
         version_id=str(uuid.uuid4()),

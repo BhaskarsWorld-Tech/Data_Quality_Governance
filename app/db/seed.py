@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Seed required domains, subdomains, and bootstrap users for all 5 roles."""
 import asyncio
 import uuid

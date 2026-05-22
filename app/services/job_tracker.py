@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Lightweight in-memory job tracker for long-running bulk operations.
 
@@ -11,7 +12,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Optional, Literal
 
 logger = logging.getLogger("dq_platform.jobs")
 
@@ -29,7 +30,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
-def create_job(job_type: str, total: int, meta: dict | None = None) -> str:
+def create_job(job_type: str, total: int, meta: Optional[dict] = None) -> str:
     job_id = str(uuid.uuid4())
     _JOBS[job_id] = {
         "job_id": job_id,
@@ -49,7 +50,7 @@ def create_job(job_type: str, total: int, meta: dict | None = None) -> str:
     return job_id
 
 
-def get_job(job_id: str) -> dict | None:
+def get_job(job_id: str) -> Optional[dict]:
     return _JOBS.get(job_id)
 
 

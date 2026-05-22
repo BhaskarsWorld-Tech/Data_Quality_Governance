@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -75,7 +77,7 @@ async def _dispatch_notification(alert: DQAlert, rule: DQRule, run: DQRuleRun, d
             domain_name = ""
             asset_name = ""
             extra_emails: list[str] = []
-            slack_webhook: str | None = None
+            slack_webhook: Optional[str] = None
 
             domain_res = await session.execute(
                 select(Domain).where(Domain.domain_id == rule.domain_id)
@@ -97,10 +99,10 @@ async def _dispatch_notification(alert: DQAlert, rule: DQRule, run: DQRuleRun, d
 
             # Check SLA config for per-asset notification overrides
             from app.db.models import SLAConfig
-            slack_webhook: str | None = None
-            teams_webhook: str | None = None
-            pagerduty_key: str | None = None
-            custom_webhook: str | None = None
+            slack_webhook: Optional[str] = None
+            teams_webhook: Optional[str] = None
+            pagerduty_key: Optional[str] = None
+            custom_webhook: Optional[str] = None
 
             sla_res = await session.execute(
                 select(SLAConfig).where(

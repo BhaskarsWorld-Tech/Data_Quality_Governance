@@ -1,3 +1,4 @@
+from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -44,7 +45,7 @@ async def evaluate_gate(
         .limit(1)
     )
     latest_qs = qs_result.scalar_one_or_none()
-    current_score: float | None = float(latest_qs.quality_score) if latest_qs else None
+    current_score: Optional[float] = float(latest_qs.quality_score) if latest_qs else None
 
     blocking_failures: list[str] = []
     recommendations: list[str] = []

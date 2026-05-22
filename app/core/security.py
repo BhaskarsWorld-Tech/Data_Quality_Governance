@@ -1,3 +1,4 @@
+from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -53,7 +54,7 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
 
 
-async def _resolve_api_key(api_key: str) -> dict | None:
+async def _resolve_api_key(api_key: str) -> Optional[dict]:
     """
     Validate an X-API-Key header value against stored service accounts.
     Returns a user-like dict on success, None if not found / invalid.
@@ -141,7 +142,7 @@ require_write = require_roles("admin", "domain_owner", "data_owner")
 require_read = require_roles("admin", "domain_owner", "data_owner", "viewer", "auditor")
 
 
-def get_domain_filter(user: dict) -> str | None:
+def get_domain_filter(user: dict) -> Optional[str]:
     """
     Return the domain_id the user is restricted to, or None for unrestricted access.
 
@@ -156,7 +157,7 @@ def get_domain_filter(user: dict) -> str | None:
     return None
 
 
-def check_domain_access(user: dict, resource_domain_id: str | None) -> None:
+def check_domain_access(user: dict, resource_domain_id: Optional[str]) -> None:
     """
     Raise HTTP 403 if the caller is a domain_owner trying to access a resource
     that belongs to a different domain.

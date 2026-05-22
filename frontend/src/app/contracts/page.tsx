@@ -1,490 +1,398 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
-import { contractsApi, assetsApi } from '@/services/apiClient'
-import { FileText, CheckCircle, XCircle, Plus, Loader2, X, Pencil, Trash2, ShieldCheck } from 'lucide-react'
-import clsx from 'clsx'
-import HowItWorks from '@/components/common/HowItWorks'
+import { useState } from 'react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+type ContractStatus = 'active' | 'breached' | 'warning'
+type FilterType = 'all' | 'active' | 'breached'
+
+interface TermCheck {
+  term: string
+  status: 'pass' | 'fail' | 'warn'
+  detail: string
+}
 
 interface Contract {
-  contract_id: string
-  contract_name: string
-  asset_id: string
-  asset_name?: string | null
-  status: 'draft' | 'active' | 'violated' | 'deprecated'
-  producer_team: string | null
-  consumer_team: string | null
-  min_quality_score: number | null
-  max_staleness_hours: number | null
-  sla_description: string | null
-  version: string | null
+  id: string; name: string; producer: string; consumer: string
+  owner: string; status: ContractStatus; compliance: number
+  checks: number; failures: number; created: string
+  connection: string; description: string; sla: string
+  terms: TermCheck[]
+  breachReason?: string
+  breachImpact?: string
+  breachRecommendation?: string
+  lastChecked: string
+  trend: string
 }
 
-interface Asset {
-  asset_id: string
-  sf_table_name: string
-  sf_schema_name: string
-}
-
-interface ContractForm {
-  contract_name: string
-  asset_id: string
-  producer_team: string
-  consumer_team: string
-  min_quality_score: string
-  max_staleness_hours: string
-  sla_description: string
-  version: string
-}
-
-const EMPTY_FORM: ContractForm = {
-  contract_name: '',
-  asset_id: '',
-  producer_team: '',
-  consumer_team: '',
-  min_quality_score: '95',
-  max_staleness_hours: '24',
-  sla_description: '',
-  version: '1.0',
-}
-
-const STATUS_CONFIG: Record<string, { cls: string; label: string }> = {
-  draft:      { cls: 'bg-gray-100 text-gray-600',    label: 'Draft' },
-  active:     { cls: 'bg-green-100 text-green-700',  label: 'Active' },
-  violated:   { cls: 'bg-red-100 text-red-700',      label: 'Violated' },
-  deprecated: { cls: 'bg-orange-100 text-orange-700', label: 'Deprecated' },
-}
-
-const STATUS_TABS = [
-  { value: '',           label: 'All' },
-  { value: 'active',     label: 'Active' },
-  { value: 'draft',      label: 'Draft' },
-  { value: 'violated',   label: 'Violated' },
-  { value: 'deprecated', label: 'Deprecated' },
+const contracts: Contract[] = [
+  {
+    id: 'ct1', name: 'Orders → Revenue Model',
+    producer: 'fact_orders', consumer: 'revenue_by_channel',
+    owner: 'Bhaskar R.', status: 'active', compliance: 98,
+    checks: 8, failures: 0, created: '2026-01-15',
+    connection: 'SF_Codex', sla: '99%', lastChecked: '2026-05-05 17:00', trend: '↑ +2% vs last week',
+    description: 'Orders table must have non-null revenue, valid currency, and row count > 10K daily.',
+    terms: [
+      { term: 'NOT NULL: revenue, order_id', status: 'pass', detail: '0 nulls across 4.2M rows' },
+      { term: 'Revenue > 0', status: 'pass', detail: '99.8% pass — 8,400 rows flagged as warnings (returns)' },
+      { term: 'Row count ≥ 10,000/day', status: 'pass', detail: '4,200,000 rows — well above threshold' },
+      { term: 'Freshness < 4h', status: 'pass', detail: 'Last update 42 minutes ago' },
+      { term: 'No duplicate order_ids', status: 'pass', detail: 'UNIQUE check passed on all 4.2M rows' },
+      { term: 'Currency code in ISO 4217', status: 'pass', detail: '100% of currency_code values valid' },
+      { term: 'Order status in allowed set', status: 'pass', detail: 'All values in [pending, confirmed, shipped, returned, cancelled]' },
+      { term: 'order_date not in future', status: 'pass', detail: '0 rows with future dates' },
+    ],
+  },
+  {
+    id: 'ct2', name: 'Customers → Marketing Platform',
+    producer: 'dim_customers', consumer: 'Marketing CDP',
+    owner: 'Priya M.', status: 'warning', compliance: 83,
+    checks: 12, failures: 2, created: '2026-02-01',
+    connection: 'SF_Codex', sla: '95%', lastChecked: '2026-05-05 12:00', trend: '↓ -11% vs last week',
+    description: 'Customer data exported to CDP must have valid emails, consent flags, and segment assignments.',
+    breachReason: 'Two checks are failing due to a CRM batch import on 2026-05-05 that skipped email validation and omitted the consent_flag field for 363,000 records. Compliance dropped from 94% to 83%, breaching the 95% SLA target.',
+    breachImpact: 'Marketing CDP is syncing invalid customer records, causing hard bounces in email campaigns and GDPR compliance risk for the 143K records missing consent flags.',
+    breachRecommendation: 'Quarantine the 220K invalid email records. Re-request corrected data from CRM vendor. Add mandatory validation to the import pipeline. Resolve within 24h to restore SLA compliance.',
+    terms: [
+      { term: 'Email format valid', status: 'fail', detail: '220,000 of 1.1M records (20%) have malformed emails — missing "@" or TLD. Introduced by CRM import on 2026-05-05.' },
+      { term: 'Consent flag NOT NULL', status: 'fail', detail: '143,000 records have NULL consent_flag. Batch update script did not set default values for new GDPR fields.' },
+      { term: 'Segment must be in [Enterprise, SMB, Consumer]', status: 'pass', detail: 'All 1.1M records have valid segment values' },
+      { term: 'No PII in free-text fields', status: 'pass', detail: 'PII scan passed — no SSN, CC, or passport patterns found' },
+      { term: 'Freshness < 24h', status: 'pass', detail: 'Last sync 11h ago — within SLA' },
+      { term: 'customer_id unique', status: 'pass', detail: 'No duplicate customer IDs' },
+      { term: 'Country code in ISO 3166', status: 'pass', detail: '100% valid country codes' },
+      { term: 'Segment not NULL', status: 'pass', detail: '0 null segments' },
+      { term: 'Age ≥ 0 if present', status: 'pass', detail: 'No negative ages' },
+      { term: 'Phone format valid if present', status: 'pass', detail: '98.2% of phone numbers are valid E.164 format' },
+      { term: 'Signup date ≤ today', status: 'pass', detail: 'No future signup dates' },
+      { term: 'Tier in [Gold, Silver, Bronze, None]', status: 'pass', detail: 'All tier values valid' },
+    ],
+  },
+  {
+    id: 'ct3', name: 'Payments → Finance Reports',
+    producer: 'fact_payments', consumer: 'finance_weekly_report',
+    owner: 'Bhaskar R.', status: 'breached', compliance: 61,
+    checks: 6, failures: 3, created: '2026-01-20',
+    connection: 'SF_Codex', sla: '99.9%', lastChecked: '2026-05-05 05:30', trend: '↓ -31% vs last week',
+    description: 'Payment data for finance must reconcile with bank statements within 0.01%.',
+    breachReason: 'Three critical checks are failing: (1) 1,482,000 rows have NULL payment_amount_usd after a payment processor API v3 migration returned empty strings for declined transactions. (2) The amount_usd column was removed in schema migration PR #3892, breaking reconciliation. (3) Settled-within-3-days check fails for 38% of records due to a processing delay from the migration.',
+    breachImpact: 'Finance reconciliation is completely blocked. The weekly Finance report cannot be generated. $2.1M in payment data is unaccountable. The Payments → Finance Reports SLA of 99.9% is in breach — currently at 61%. P0 incident declared.',
+    breachRecommendation: 'URGENT: (1) Deploy the hotfix for payment_amount_usd NULL handling in the ETL. (2) Restore the amount_usd column alias in fact_payments. (3) Reprocess the affected payment batch. Target: restore to >95% compliance within 4 hours.',
+    terms: [
+      { term: 'Amount reconciliation < 0.01%', status: 'fail', detail: '1,482,000 rows (39%) have NULL in payment_amount_usd — payment processor API v3 migration returned empty strings for declined transactions which were not cast correctly.' },
+      { term: 'No orphaned payment records', status: 'pass', detail: 'All payment records have matching order_ids' },
+      { term: 'currency_code in ISO 4217', status: 'pass', detail: 'All currency codes valid' },
+      { term: 'Fraud flag NOT NULL', status: 'fail', detail: '892,000 rows (23%) have NULL fraud_flag — the fraud scoring service was unavailable during the payment processor migration window and returned no scores.' },
+      { term: 'Settled within 3 business days', status: 'fail', detail: '1,444,000 rows (38%) are outside the 3-day settlement window — caused by the processing backlog from the migration outage.' },
+      { term: 'Duplicate payment_id check', status: 'pass', detail: 'No duplicate payment IDs' },
+    ],
+  },
+  {
+    id: 'ct4', name: 'Inventory → Supply Chain API',
+    producer: 'fact_inventory', consumer: 'SCM API v2',
+    owner: 'Rajan S.', status: 'active', compliance: 91,
+    checks: 5, failures: 1, created: '2026-03-10',
+    connection: 'SF_Codex', sla: '98%', lastChecked: '2026-05-05 16:00', trend: '↓ -7% vs last week',
+    description: 'Inventory snapshot must be refreshed every 6 hours with positive stock quantities.',
+    breachReason: 'One check is failing — the stock_qty >= 0 check has 94 records with NULL SKU values introduced by warehouse mobile app entries without barcode scans.',
+    breachImpact: 'Compliance is at 91%, below the 98% SLA. 94 inventory records cannot be matched to the product catalog, creating blind spots in the SCM API reorder logic.',
+    breachRecommendation: 'Manually reconcile the 94 NULL-SKU records. Add mandatory SKU scan validation to the warehouse mobile app. Resolve within 48h to restore SLA compliance.',
+    terms: [
+      { term: 'Freshness < 6h', status: 'pass', detail: 'Last snapshot 45 minutes ago' },
+      { term: 'stock_qty >= 0', status: 'pass', detail: '0 negative stock quantities' },
+      { term: 'warehouse_id NOT NULL', status: 'pass', detail: '100% of records have warehouse_id' },
+      { term: 'SKU matches product catalog', status: 'fail', detail: '94 records (0.01%) have NULL SKU — operators skipped barcode scan on warehouse mobile app. Cannot join to dim_products.' },
+      { term: 'snapshot_ts within expected window', status: 'pass', detail: 'All snapshot timestamps within the expected 6h window' },
+    ],
+  },
+  {
+    id: 'ct5', name: 'Web Sessions → Attribution',
+    producer: 'web_sessions', consumer: 'attribution_model',
+    owner: 'Priya M.', status: 'active', compliance: 96,
+    checks: 7, failures: 0, created: '2026-04-01',
+    connection: 'SF_Codex', sla: '97%', lastChecked: '2026-05-05 17:00', trend: '↑ +1% vs last week',
+    description: 'Session data piped to attribution model must have valid UTMs and user IDs.',
+    terms: [
+      { term: 'utm_source NOT NULL for paid sessions', status: 'pass', detail: '99.2% of paid sessions have utm_source — 0.8% are known direct-type sessions exempted by contract' },
+      { term: 'session_id unique', status: 'pass', detail: 'No duplicate session IDs across 9.5M sessions' },
+      { term: 'user_id hashed (SHA-256)', status: 'pass', detail: '100% of user_ids are valid SHA-256 hashes' },
+      { term: 'No sessions > 24h duration', status: 'pass', detail: '2% of sessions flagged as long — within the 5% warning threshold' },
+      { term: 'session_start ≤ session_end', status: 'pass', detail: 'No inverted session timestamps' },
+      { term: 'channel in allowed set', status: 'pass', detail: 'All channel values valid' },
+      { term: 'Freshness < 2h', status: 'pass', detail: 'Last update 38 minutes ago' },
+    ],
+  },
 ]
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
-
-interface ToastProps { message: string; type: 'success' | 'error' }
-
-function Toast({ message, type }: ToastProps) {
-  return (
-    <div className={clsx(
-      'fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium',
-      type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
-    )}>
-      {type === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />}
-      <span>{message}</span>
-    </div>
-  )
+const complianceColor = (c: number) => c >= 90 ? '#16a34a' : c >= 75 ? '#ca8a04' : '#dc2626'
+const stCfg: Record<ContractStatus, { bg: string; color: string; border: string }> = {
+  active:  { bg: '#f0fdf4', color: '#16a34a', border: '#bbf7d0' },
+  warning: { bg: '#fef3c7', color: '#d97706', border: '#fde68a' },
+  breached:{ bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' },
 }
-
-// ── Modal ─────────────────────────────────────────────────────────────────────
-
-function ContractModal({
-  contract,
-  assets,
-  onClose,
-  onSave,
-}: {
-  contract: Contract | null
-  assets: Asset[]
-  onClose: () => void
-  onSave: () => void
-}) {
-  const [form, setForm] = useState<ContractForm>(
-    contract
-      ? {
-          contract_name:      contract.contract_name,
-          asset_id:           contract.asset_id,
-          producer_team:      contract.producer_team ?? '',
-          consumer_team:      contract.consumer_team ?? '',
-          min_quality_score:  String(contract.min_quality_score ?? 95),
-          max_staleness_hours: String(contract.max_staleness_hours ?? 24),
-          sla_description:    contract.sla_description ?? '',
-          version:            contract.version ?? '1.0',
-        }
-      : EMPTY_FORM
-  )
-  const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState('')
-
-  const set = (field: keyof ContractForm, val: string) =>
-    setForm(prev => ({ ...prev, [field]: val }))
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!form.contract_name.trim()) { setError('Contract name is required'); return }
-    if (!form.asset_id) { setError('Please select a data asset'); return }
-    setSaving(true)
-    setError('')
-    try {
-      const payload = {
-        ...form,
-        min_quality_score: form.min_quality_score ? Number(form.min_quality_score) : null,
-        max_staleness_hours: form.max_staleness_hours ? Number(form.max_staleness_hours) : null,
-      }
-      if (contract) {
-        await contractsApi.update(contract.contract_id, payload)
-      } else {
-        await contractsApi.create(payload)
-      }
-      onSave()
-    } catch {
-      setError('Failed to save contract. Please try again.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white">
-          <h2 className="text-base font-semibold text-gray-900">
-            {contract ? 'Edit Contract' : 'New Data Contract'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X size={18} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Contract Name *</label>
-            <input
-              value={form.contract_name}
-              onChange={e => set('contract_name', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="e.g. Revenue Invoices SLA Agreement"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Data Asset *</label>
-            <select
-              value={form.asset_id}
-              onChange={e => set('asset_id', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">— Select asset —</option>
-              {assets.map(a => (
-                <option key={a.asset_id} value={a.asset_id}>
-                  {a.sf_schema_name}.{a.sf_table_name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Producer Team</label>
-              <input
-                value={form.producer_team}
-                onChange={e => set('producer_team', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Revenue Engineering"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Consumer Team</label>
-              <input
-                value={form.consumer_team}
-                onChange={e => set('consumer_team', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Finance Analytics"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Min Quality Score (%)</label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={form.min_quality_score}
-                onChange={e => set('min_quality_score', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Max Staleness (hours)</label>
-              <input
-                type="number"
-                min={1}
-                value={form.max_staleness_hours}
-                onChange={e => set('max_staleness_hours', e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">SLA Description</label>
-            <textarea
-              value={form.sla_description}
-              onChange={e => set('sla_description', e.target.value)}
-              rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-              placeholder="Describe the data quality guarantees..."
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Version</label>
-            <input
-              value={form.version}
-              onChange={e => set('version', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="1.0"
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving && <Loader2 size={14} className="animate-spin" />}
-              {contract ? 'Save Changes' : 'Create Contract'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-// ── Main page ─────────────────────────────────────────────────────────────────
+const termIcon = { pass: '✅', fail: '❌', warn: '⚠️' }
+const termColor = { pass: '#16a34a', fail: '#dc2626', warn: '#d97706' }
+const termBg   = { pass: '#f0fdf4', fail: '#fff1f2', warn: '#fffbeb' }
 
 export default function ContractsPage() {
-  const [contracts, setContracts] = useState<Contract[]>([])
-  const [assets, setAssets]       = useState<Asset[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [statusTab, setStatusTab] = useState('')
-  const [modal, setModal]         = useState<'create' | Contract | null>(null)
-  const [validating, setValidating] = useState<string | null>(null)
-  const [deleting, setDeleting]   = useState<string | null>(null)
-  const [toast, setToast]         = useState<ToastProps | null>(null)
+  const [filter, setFilter]     = useState<FilterType>('all')
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [search, setSearch]     = useState('')
 
-  const showToast = (message: string, type: 'success' | 'error') => {
-    setToast({ message, type })
-    setTimeout(() => setToast(null), 4000)
-  }
+  const total   = contracts.length
+  const active  = contracts.filter(c => c.status === 'active').length
+  const breached = contracts.filter(c => c.status === 'breached').length
+  const avgComp = Math.round(contracts.reduce((s, c) => s + c.compliance, 0) / contracts.length)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params: Record<string, string> = {}
-      if (statusTab) params.status = statusTab
-      const [contractsRes, assetsRes] = await Promise.all([
-        contractsApi.list(params),
-        assetsApi.list(),
-      ])
-      setContracts(Array.isArray(contractsRes.data) ? contractsRes.data : [])
-      setAssets(Array.isArray(assetsRes.data) ? assetsRes.data : [])
-    } catch {
-      setContracts([])
-    } finally {
-      setLoading(false)
-    }
-  }, [statusTab])
+  const filtered = contracts.filter(c => {
+    const matchFilter =
+      filter === 'all'     ? true :
+      filter === 'active'  ? c.status === 'active' || c.status === 'warning' :
+      filter === 'breached'? c.status === 'breached' : true
+    const matchSearch = search === '' ||
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.producer.toLowerCase().includes(search.toLowerCase()) ||
+      c.consumer.toLowerCase().includes(search.toLowerCase())
+    return matchFilter && matchSearch
+  })
 
-  useEffect(() => { load() }, [load])
-
-  const handleValidate = async (id: string) => {
-    setValidating(id)
-    try {
-      const res = await contractsApi.validate(id)
-      const data = res.data
-      if (data.compliant) {
-        showToast('Contract validation passed', 'success')
-      } else {
-        const issues = Array.isArray(data.issues) && data.issues.length > 0
-          ? data.issues.join(' | ')
-          : 'Compliance check failed'
-        showToast(`Violated: ${issues}`, 'error')
-      }
-      // Reload to reflect any status change (e.g. active → violated)
-      load()
-    } catch {
-      showToast('Validation failed — check backend logs', 'error')
-    } finally {
-      setValidating(null)
-    }
-  }
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this contract?')) return
-    setDeleting(id)
-    try {
-      await contractsApi.delete(id)
-      setContracts(prev => prev.filter(c => c.contract_id !== id))
-    } finally {
-      setDeleting(null)
-    }
-  }
+  const statCards = [
+    { key: 'all'      as FilterType, label: 'Total Contracts', value: total,   icon: '📄', color: '#2563eb',  activeBg: '#2563eb'  },
+    { key: 'active'   as FilterType, label: 'Active',          value: active,  icon: '✅', color: '#16a34a',  activeBg: '#16a34a'  },
+    { key: 'breached' as FilterType, label: 'Breached',        value: breached,icon: '🚨', color: '#dc2626',  activeBg: '#dc2626'  },
+    { key: 'all'      as FilterType, label: 'Avg Compliance',  value: avgComp + '%', icon: '📊', color: complianceColor(avgComp), activeBg: '#475569' },
+  ]
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+    <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
+      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
+        Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Data Contracts</h1>
-          <p className="text-gray-500 text-sm mt-1">SLA agreements between data producers and consumers</p>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Data Contracts</h1>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>
+            Agreements between data producers and consumers
+            {breached > 0 && <span style={{ color: '#dc2626', fontWeight: 600 }}> — {breached} breach{breached > 1 ? 'es' : ''} active</span>}
+          </p>
         </div>
-        <button
-          onClick={() => setModal('create')}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
-        >
-          <Plus size={15} />
-          New Contract
+        <button style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>
+          + New Contract
         </button>
       </div>
 
-      <HowItWorks
-        storageKey="contracts"
-        title="How Data Contracts Work"
-        steps={[
-          { icon: <FileText size={13} />, title: 'Create a Contract', description: 'Define a formal SLA between a producer team and a consumer team for a specific Snowflake table.' },
-          { icon: <ShieldCheck size={13} />, title: 'Set Guarantees', description: 'Specify minimum quality score, maximum data staleness (hours), and acceptable null percentage.' },
-          { icon: <XCircle size={13} />, title: 'Auto-Detect Breach', description: 'The platform automatically sets status to Violated when a quality, freshness, or schema guarantee is broken.' },
-          { icon: <CheckCircle size={13} />, title: 'Validate On Demand', description: 'Click Validate on any contract to check current compliance without waiting for the scheduled run.' },
-        ]}
-      />
-
-      {/* Status tabs */}
-      <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
-        {STATUS_TABS.map(tab => (
-          <button
-            key={tab.value}
-            onClick={() => setStatusTab(tab.value)}
-            className={clsx(
-              'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors',
-              statusTab === tab.value
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* Clickable stat cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>
+        {statCards.map((card, idx) => {
+          const isActive = filter === card.key && !(idx === 0 || idx === 3)
+          return (
+            <div key={idx} onClick={() => idx === 0 || idx === 3 ? setFilter('all') : setFilter(isActive ? 'all' : card.key)}
+              style={{
+                background: isActive ? card.activeBg : '#fff',
+                border: `2px solid ${isActive ? card.activeBg : '#ebe8df'}`,
+                borderRadius: '12px', padding: '16px 20px',
+                cursor: idx === 0 || idx === 3 ? 'default' : 'pointer',
+                boxShadow: isActive ? `0 4px 16px ${card.activeBg}40` : 'none',
+                transition: 'all 0.18s',
+              }}>
+              <div style={{ fontSize: '22px', marginBottom: '6px' }}>{card.icon}</div>
+              <div style={{ fontSize: '26px', fontWeight: 700, color: isActive ? '#fff' : card.color }}>{card.value}</div>
+              <div style={{ fontSize: '12px', color: isActive ? 'rgba(255,255,255,0.8)' : '#64748b', marginTop: '2px' }}>{card.label}</div>
+              {isActive && <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.65)', marginTop: '3px' }}>Click to clear</div>}
+            </div>
+          )
+        })}
       </div>
 
-      {/* Table */}
-      {loading ? (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                {['Contract Name', 'Asset', 'Status', 'Producer', 'Consumer', 'Min Quality', 'Version', 'Actions'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i} className="border-b border-gray-50">
-                  {Array.from({ length: 8 }).map((__, j) => (
-                    <td key={j} className="px-4 py-3">
-                      <div className="h-3 bg-gray-100 rounded animate-pulse w-3/4" />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Search */}
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        placeholder="Search contracts by name, producer, or consumer…"
+        style={{ width: '100%', padding: '9px 14px', borderRadius: '9px', border: '1px solid #e2e8f0', fontSize: '13px', background: '#fafaf9', color: '#0f172a', marginBottom: '16px', boxSizing: 'border-box', outline: 'none' }} />
+
+      {/* Filter label */}
+      {filter !== 'all' && (
+        <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12.5px', color: '#64748b' }}>Showing:</span>
+          <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>{filter}</span>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>{filtered.length} result{filtered.length !== 1 ? 's' : ''}</span>
+          <button onClick={() => setFilter('all')} style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>✕ Clear</button>
         </div>
-      ) : contracts.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24">
-          <div className="w-16 h-16 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
-            <FileText size={28} className="text-blue-400" />
-          </div>
-          <p className="text-base font-semibold text-gray-800">No data contracts found</p>
-          <p className="text-sm text-gray-400 mt-1">Create your first contract to enforce data SLAs.</p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                {['Contract Name', 'Asset', 'Status', 'Producer', 'Consumer', 'Min Quality', 'Version', 'Actions'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {contracts.map(c => {
-                const st = STATUS_CONFIG[c.status] ?? STATUS_CONFIG.draft
-                return (
-                  <tr key={c.contract_id} className="hover:bg-gray-50/60 transition-colors">
-                    <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{c.contract_name}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500 font-mono">{c.asset_name ?? c.asset_id.slice(0, 8) + '…'}</td>
-                    <td className="px-4 py-3">
-                      <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', st.cls)}>{st.label}</span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{c.producer_team ?? '—'}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{c.consumer_team ?? '—'}</td>
-                    <td className="px-4 py-3 text-xs text-gray-700 font-medium">
-                      {c.min_quality_score !== null ? `${c.min_quality_score}%` : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{c.version ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleValidate(c.contract_id)}
-                          disabled={validating === c.contract_id}
-                          className="flex items-center gap-1 px-2 py-1 text-xs text-green-700 border border-green-200 rounded-lg hover:bg-green-50 disabled:opacity-50 whitespace-nowrap"
-                        >
-                          {validating === c.contract_id
-                            ? <Loader2 size={11} className="animate-spin" />
-                            : <CheckCircle size={11} />}
-                          Validate
-                        </button>
-                        <button
-                          onClick={() => setModal(c)}
-                          className="p-1 text-gray-400 hover:text-blue-600"
-                          title="Edit"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(c.contract_id)}
-                          disabled={deleting === c.contract_id}
-                          className="p-1 text-gray-400 hover:text-red-600 disabled:opacity-40"
-                          title="Delete"
-                        >
-                          {deleting === c.contract_id
-                            ? <Loader2 size={13} className="animate-spin" />
-                            : <Trash2 size={13} />}
-                        </button>
+      )}
+
+      {/* Contract cards */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {filtered.map(c => {
+          const ss = stCfg[c.status]
+          const cc = complianceColor(c.compliance)
+          const isOpen = expanded === c.id
+          const failedTerms = c.terms.filter(t => t.status === 'fail')
+          const warnTerms   = c.terms.filter(t => t.status === 'warn')
+
+          return (
+            <div key={c.id} style={{
+              background: '#fff',
+              border: `1.5px solid ${isOpen ? '#6366f1' : c.status === 'breached' ? '#fca5a5' : c.status === 'warning' ? '#fde68a' : '#ebe8df'}`,
+              borderRadius: '14px', overflow: 'hidden',
+              boxShadow: isOpen ? '0 6px 24px rgba(99,102,241,0.13)' : c.status === 'breached' ? '0 2px 8px rgba(220,38,38,0.08)' : '0 1px 3px rgba(0,0,0,0.04)',
+              transition: 'all 0.2s',
+            }}>
+
+              {/* Summary row */}
+              <div onClick={() => setExpanded(isOpen ? null : c.id)}
+                style={{ padding: '18px 22px', cursor: 'pointer', userSelect: 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a1a' }}>{c.name}</span>
+                      <span style={{ ...ss, padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>{c.status}</span>
+                      {failedTerms.length > 0 && (
+                        <span style={{ background: '#fee2e2', color: '#dc2626', padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
+                          {failedTerms.length} check{failedTerms.length > 1 ? 's' : ''} failing
+                        </span>
+                      )}
+                      {warnTerms.length > 0 && (
+                        <span style={{ background: '#fef3c7', color: '#d97706', padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
+                          {warnTerms.length} warning{warnTerms.length > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '12.5px', color: '#64748b', marginBottom: '8px' }}>{c.description}</div>
+                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#94a3b8', flexWrap: 'wrap' }}>
+                      <span>Producer: <strong style={{ color: '#475569' }}>{c.producer}</strong></span>
+                      <span>Consumer: <strong style={{ color: '#475569' }}>{c.consumer}</strong></span>
+                      <span>Owner: <strong style={{ color: '#475569' }}>{c.owner}</strong></span>
+                      <span>SLA: <strong style={{ color: cc }}>{c.sla}</strong></span>
+                      <span style={{ color: c.trend.startsWith('↑') ? '#16a34a' : '#dc2626' }}>{c.trend}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '30px', fontWeight: 800, color: cc, lineHeight: 1 }}>{c.compliance}%</div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>compliance</div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>{c.checks} checks · {c.failures} fail</div>
+                    </div>
+                    <div style={{
+                      width: '28px', height: '28px', borderRadius: '8px',
+                      background: isOpen ? '#6366f1' : '#f1f5f9',
+                      color: isOpen ? '#fff' : '#64748b',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '12px', transition: 'all 0.18s',
+                    }}>
+                      {isOpen ? '▲' : '▼'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Compliance bar */}
+                <div style={{ marginTop: '12px', height: '5px', background: '#f1f5f9', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${c.compliance}%`, background: cc, borderRadius: '4px', transition: 'width 0.5s' }} />
+                </div>
+              </div>
+
+              {/* Expanded detail */}
+              {isOpen && (
+                <div style={{ borderTop: '2px solid #f1f5f9', background: '#f8fafd' }}>
+
+                  {/* Metadata bar */}
+                  <div style={{ display: 'flex', background: '#fff', borderBottom: '1px solid #f1f5f9' }}>
+                    {[
+                      { label: 'Connection',   value: c.connection },
+                      { label: 'SLA Target',   value: c.sla },
+                      { label: 'Created',      value: c.created },
+                      { label: 'Last Checked', value: c.lastChecked },
+                      { label: 'Trend',        value: c.trend },
+                    ].map((m, i) => (
+                      <div key={i} style={{ flex: 1, padding: '10px 16px', borderRight: i < 4 ? '1px solid #f1f5f9' : 'none' }}>
+                        <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '3px' }}>{m.label}</div>
+                        <div style={{ fontSize: '12.5px', fontWeight: 600, color: m.label === 'Trend' ? (m.value.startsWith('↑') ? '#16a34a' : '#dc2626') : '#334155' }}>{m.value}</div>
                       </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                    ))}
+                  </div>
 
-      {/* Modal */}
-      {modal && (
-        <ContractModal
-          contract={modal === 'create' ? null : modal}
-          assets={assets}
-          onClose={() => setModal(null)}
-          onSave={() => { setModal(null); load() }}
-        />
-      )}
+                  <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
-      {/* Toast */}
-      {toast && <Toast {...toast} />}
+                    {/* Breach explanation (only if breached or warning) */}
+                    {(c.status === 'breached' || c.status === 'warning') && c.breachReason && (
+                      <>
+                        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #fca5a5', overflow: 'hidden' }}>
+                          <div style={{ background: '#fee2e2', padding: '10px 16px', borderBottom: '1px solid #fca5a5', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '16px' }}>🚨</span>
+                            <span style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                              {c.status === 'breached' ? 'Breach Reason — Why is this contract failing?' : 'Warning — What is at risk?'}
+                            </span>
+                          </div>
+                          <div style={{ padding: '14px 16px', fontSize: '13px', color: '#1e293b', lineHeight: '1.7' }}>{c.breachReason}</div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                          <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #fdba74', overflow: 'hidden' }}>
+                            <div style={{ background: '#fff7ed', padding: '10px 16px', borderBottom: '1px solid #fdba74', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '16px' }}>💥</span>
+                              <span style={{ fontSize: '12px', fontWeight: 800, color: '#ea580c', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Business Impact</span>
+                            </div>
+                            <div style={{ padding: '14px 16px', fontSize: '13px', color: '#1e293b', lineHeight: '1.7' }}>{c.breachImpact}</div>
+                          </div>
+                          <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #bbf7d0', overflow: 'hidden' }}>
+                            <div style={{ background: '#f0fdf4', padding: '10px 16px', borderBottom: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '16px' }}>✅</span>
+                              <span style={{ fontSize: '12px', fontWeight: 800, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Recommended Fix</span>
+                            </div>
+                            <div style={{ padding: '14px 16px', fontSize: '13px', color: '#1e293b', lineHeight: '1.7' }}>{c.breachRecommendation}</div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Contract Terms checklist */}
+                    <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e9eef5', overflow: 'hidden' }}>
+                      <div style={{ padding: '12px 16px', background: '#fafaf9', borderBottom: '1px solid #e9eef5', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '16px' }}>📋</span>
+                        <span style={{ fontSize: '12px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Contract Terms — Check-by-Check Results</span>
+                        <span style={{ marginLeft: 'auto', fontSize: '11.5px', color: '#94a3b8' }}>
+                          {c.terms.filter(t => t.status === 'pass').length}/{c.terms.length} passing
+                        </span>
+                      </div>
+                      <div style={{ padding: '8px 0' }}>
+                        {c.terms.map((t, i) => (
+                          <div key={i} style={{
+                            padding: '10px 16px',
+                            background: t.status !== 'pass' ? termBg[t.status] : 'transparent',
+                            borderLeft: `3px solid ${t.status !== 'pass' ? termColor[t.status] : 'transparent'}`,
+                            marginLeft: t.status !== 'pass' ? '0' : '3px',
+                            borderBottom: i < c.terms.length - 1 ? '1px solid #f3f1ea' : 'none',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                              <span style={{ fontSize: '14px', flexShrink: 0, marginTop: '1px' }}>{termIcon[t.status]}</span>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#1e293b', marginBottom: '2px' }}>{t.term}</div>
+                                <div style={{ fontSize: '12px', color: t.status !== 'pass' ? termColor[t.status] : '#64748b', lineHeight: '1.5' }}>{t.detail}</div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Collapse */}
+                    <div>
+                      <button onClick={() => setExpanded(null)} style={{ padding: '7px 14px', borderRadius: '8px', border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '12px', cursor: 'pointer' }}>
+                        ▲ Collapse
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {filtered.length === 0 && (
+          <div style={{ padding: '60px', textAlign: 'center', color: '#94a3b8', background: '#fff', borderRadius: '14px', border: '2px dashed #e2e8f0' }}>
+            No contracts match your filters
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,37 +1,22 @@
 import type { Metadata } from 'next'
 import './globals.css'
-import ClientLayout from '@/components/layout/ClientLayout'
-import { ThemeProvider } from '@/components/layout/ThemeProvider'
-import { Toaster } from 'sonner'
+import Sidebar from '@/components/Sidebar'
+import AgentChat from '@/components/agent/AgentChat'
 
 export const metadata: Metadata = {
-  title: 'DataGuard',
-  description: 'DataGuard — Enterprise Data Quality & Governance Platform powered by AI',
+  title: 'DataGuard - Data Quality Platform',
+  description: 'AI-powered data quality monitoring and management',
 }
-
-// Inline script executed before React hydrates → prevents flash of wrong theme
-const themeScript = `
-(function(){
-  try {
-    var t = localStorage.getItem('dq-theme');
-    var m = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (t === 'dark' || (!t && m)) document.documentElement.classList.add('dark');
-  } catch(e){}
-})();
-`
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        {/* Must run synchronously before first paint to avoid theme flash */}
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
-      <body>
-        <ThemeProvider>
-          <ClientLayout>{children}</ClientLayout>
-        </ThemeProvider>
-        <Toaster position="top-right" richColors closeButton />
+    <html lang="en">
+      <body style={{ display: 'flex', minHeight: '100vh', background: '#fdfcf7' }}>
+        <Sidebar />
+        <main style={{ flex: 1, marginLeft: '240px', minHeight: '100vh', overflow: 'auto' }}>
+          {children}
+        </main>
+        <AgentChat />
       </body>
     </html>
   )

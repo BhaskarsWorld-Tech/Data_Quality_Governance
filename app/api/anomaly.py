@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -28,7 +30,7 @@ async def create_detector(payload: dict, db: AsyncSession = Depends(get_db), use
 
 
 @router.get("/detectors")
-async def list_detectors(asset_id: str | None = None, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def list_detectors(asset_id: Optional[str] = None, db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
     q = select(AnomalyDetector).where(AnomalyDetector.is_active == True)
     if asset_id:
         q = q.where(AnomalyDetector.asset_id == asset_id)
@@ -99,7 +101,7 @@ async def run_detector(detector_id: str, db: AsyncSession = Depends(get_db), _=D
 
 
 @router.get("/detections")
-async def list_detections(asset_id: str | None = None, is_acknowledged: bool | None = None,
+async def list_detections(asset_id: Optional[str] = None, is_acknowledged: Optional[bool] = None,
                            db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
     q = select(AnomalyDetection)
     if asset_id:

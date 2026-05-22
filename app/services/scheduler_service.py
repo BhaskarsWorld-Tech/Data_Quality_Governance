@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -11,8 +13,8 @@ scheduler = AsyncIOScheduler(timezone=settings.default_timezone)
 
 # ── Trigger builder ───────────────────────────────────────────────────────────
 
-def build_trigger(frequency: str, cron_expr: str | None, timezone: str,
-                  run_at_hour: int = 6, run_at_minute: int = 0) -> CronTrigger | None:
+def build_trigger(frequency: str, cron_expr: Optional[str], timezone: str,
+                  run_at_hour: int = 6, run_at_minute: int = 0) -> Optional[CronTrigger]:
     tz = timezone or settings.default_timezone
     if frequency == "on_demand":
         return None
@@ -53,9 +55,9 @@ async def _run_rules_concurrently(
         await asyncio.gather(*tasks)
 
 
-def _make_runner(schedule_id: str, rule_id: str | None, asset_id: str | None,
-                 subdomain_id: str | None, domain_id: str | None,
-                 rule_ids: list[str] | None = None):
+def _make_runner(schedule_id: str, rule_id: Optional[str], asset_id: Optional[str],
+                 subdomain_id: Optional[str], domain_id: Optional[str],
+                 rule_ids: Optional[list[str]] = None):
     async def run():
         from app.db.database import AsyncSessionLocal
         from app.db.models import DQRule, DQSchedule
@@ -115,11 +117,11 @@ def _make_runner(schedule_id: str, rule_id: str | None, asset_id: str | None,
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def register_schedule(schedule_id: str, rule_id: str | None, asset_id: str | None,
-                      subdomain_id: str | None, domain_id: str | None,
-                      frequency: str, cron_expr: str | None, timezone: str,
+def register_schedule(schedule_id: str, rule_id: Optional[str], asset_id: Optional[str],
+                      subdomain_id: Optional[str], domain_id: Optional[str],
+                      frequency: str, cron_expr: Optional[str], timezone: str,
                       run_at_hour: int = 6, run_at_minute: int = 0,
-                      rule_ids: list[str] | None = None):
+                      rule_ids: Optional[list[str]] = None):
     """Add or replace an APScheduler job for the given schedule record."""
     job_id = f"sched_{schedule_id}"
     trigger = build_trigger(frequency, cron_expr, timezone, run_at_hour, run_at_minute)
@@ -141,7 +143,7 @@ def remove_schedule(schedule_id: str):
         logger.info(f"Removed schedule job {schedule_id}")
 
 
-def get_next_run(schedule_id: str) -> str | None:
+def get_next_run(schedule_id: str) -> Optional[str]:
     job = scheduler.get_job(f"sched_{schedule_id}")
     if job and job.next_run_time:
         return job.next_run_time.isoformat()
@@ -161,12 +163,12 @@ def list_jobs() -> list[dict]:
 
 # ── Rule-ID JSON helpers ──────────────────────────────────────────────────────
 
-def _rule_ids_to_db(rule_ids: list[str] | None) -> str | None:
+def _rule_ids_to_db(rule_ids: Optional[list[str]]) -> Optional[str]:
     import json
     return json.dumps(rule_ids) if rule_ids else None
 
 
-def _rule_ids_from_db(raw: str | None) -> list[str] | None:
+def _rule_ids_from_db(raw: Optional[str]) -> Optional[list[str]]:
     import json
     if not raw:
         return None
@@ -582,7 +584,7 @@ def stop_scheduler():
 
 
 # Legacy shims — kept so existing code that calls these doesn't break
-def schedule_rule(rule_id: str, frequency: str, cron_expr: str | None = None):
+def schedule_rule(rule_id: str, frequency: str, cron_expr: Optional[str] = None):
     register_schedule(rule_id, rule_id, None, None, None, frequency, cron_expr,
                       settings.default_timezone)
 

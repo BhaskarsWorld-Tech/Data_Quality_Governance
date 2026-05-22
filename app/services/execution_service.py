@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -11,7 +13,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 logger = logging.getLogger("dq_platform.execution")
 
-_EXECUTION_SEMAPHORE: asyncio.Semaphore | None = None
+_EXECUTION_SEMAPHORE: Optional[asyncio.Semaphore] = None
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -57,7 +59,7 @@ class _DynamicExecutor:
     executions rather than opened and closed for every query.
     """
 
-    def __init__(self, conn: SnowflakeConnection, database_override: str | None = None):
+    def __init__(self, conn: SnowflakeConnection, database_override: Optional[str] = None):
         self._conn = conn
         self._database = database_override or conn.default_database or None
 
@@ -128,7 +130,7 @@ class _DynamicExecutor:
         return int(rows[0]["cnt"]) if rows else 0
 
 
-async def _resolve_executor(asset: DataAsset, db: AsyncSession, database: str | None = None):
+async def _resolve_executor(asset: DataAsset, db: AsyncSession, database: Optional[str] = None):
     """
     Returns a Snowflake executor by looking up:
       1. The connection saved on the asset (connection_id)
@@ -136,7 +138,7 @@ async def _resolve_executor(asset: DataAsset, db: AsyncSession, database: str | 
       3. The env-var-based global client (legacy)
     Raises RuntimeError with a clear message if nothing is configured.
     """
-    conn_record: SnowflakeConnection | None = None
+    conn_record: Optional[SnowflakeConnection] = None
 
     if asset.connection_id:
         res = await db.execute(
@@ -366,8 +368,8 @@ async def _volume_baseline_check(rule_id: str, current_count: int, db: AsyncSess
 
 async def _save_error_run(
     db: AsyncSession, rule: DQRule, asset: DataAsset,
-    error_msg: str, start: datetime | None = None, end: datetime | None = None,
-    sql: str | None = None,
+    error_msg: str, start: Optional[datetime] = None, end: Optional[datetime] = None,
+    sql: Optional[str] = None,
 ) -> DQRuleRun:
     run = DQRuleRun(
         run_id=_gen_id(),
@@ -395,7 +397,7 @@ async def execute_asset_rules(asset_id: str, db: AsyncSession) -> list[DQRuleRun
 
     semaphore = _get_semaphore()
 
-    async def _run_one(rule: DQRule) -> DQRuleRun | None:
+    async def _run_one(rule: DQRule) -> Optional[DQRuleRun]:
         async with semaphore:
             try:
                 return await execute_rule(rule.rule_id, db)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Auto Data Discovery background service.
 

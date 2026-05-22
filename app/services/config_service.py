@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -73,7 +75,7 @@ CONFIG_DEFAULTS: list[dict] = [
 ]
 
 
-def _first_by_key(result) -> "AppConfig | None":
+def _first_by_key(result) -> "Optional[AppConfig]":
     """Return the first row from a query result, safe when duplicates exist."""
     return result.scalars().first()
 
@@ -121,7 +123,7 @@ async def get_by_category(category: str, db: AsyncSession) -> list[AppConfig]:
     return rows
 
 
-async def get_value(key: str, db: AsyncSession) -> str | None:
+async def get_value(key: str, db: AsyncSession) -> Optional[str]:
     """Return the config value, decrypting it if it is marked secret."""
     result = await db.execute(select(AppConfig).where(AppConfig.key == key).order_by(AppConfig.updated_at.desc()))
     row = _first_by_key(result)

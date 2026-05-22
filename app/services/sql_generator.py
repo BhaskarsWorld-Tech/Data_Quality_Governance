@@ -1,3 +1,4 @@
+from __future__ import annotations
 import re
 import logging
 from typing import Any
@@ -33,7 +34,7 @@ def _validate_condition(condition: str) -> str:
 class SQLGenerator:
     """Generates Snowflake SQL for each rule type."""
 
-    def generate_sample(self, rule_type: str, config: dict[str, Any], table_ref: str, column: str | None, limit: int = 5) -> str | None:
+    def generate_sample(self, rule_type: str, config: dict[str, Any], table_ref: str, column: Optional[str], limit: int = 5) -> Optional[str]:
         """Generate SQL to fetch a sample of failing rows. Returns None if not applicable for the rule type."""
         if not column and config.get("columns"):
             column = config["columns"][0]
@@ -111,7 +112,7 @@ class SQLGenerator:
 
         return None
 
-    def generate(self, rule_type: str, config: dict[str, Any], table_ref: str, column: str | None) -> str:
+    def generate(self, rule_type: str, config: dict[str, Any], table_ref: str, column: Optional[str]) -> str:
         # Multi-column support: if config has "columns" list, use it as primary reference
         if not column and config.get("columns"):
             column = config["columns"][0]
@@ -139,14 +140,14 @@ class SQLGenerator:
             raise ValueError(f"Unsupported rule type: {rule_type}")
         return gen_fn(config, table_ref, column)
 
-    def _null_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _null_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         columns = config.get("columns") or ([column] if column else None)
         if not columns:
             raise ValueError("null_check requires target_column or config.columns")
         conditions = " OR ".join(f'"{c}" IS NULL' for c in columns)
         return f'SELECT COUNT(*) AS failed_count FROM {table_ref} WHERE {conditions}'
 
-    def _uniqueness_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _uniqueness_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         columns = config.get("columns") or ([column] if column else None)
         if not columns:
             raise ValueError("uniqueness_check requires target_column or config.columns")
@@ -157,10 +158,10 @@ class SQLGenerator:
             f'GROUP BY {cols_quoted} HAVING COUNT(*) > 1) AS _dups'
         )
 
-    def _duplicate_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _duplicate_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         return self._uniqueness_check(config, table_ref, column)
 
-    def _accepted_values_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _accepted_values_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         if not column:
             raise ValueError("accepted_values_check requires target_column")
         values = config.get("accepted_values", [])
@@ -169,7 +170,7 @@ class SQLGenerator:
         quoted = ", ".join(f"'{v}'" for v in values)
         return f'SELECT COUNT(*) AS failed_count FROM {table_ref} WHERE "{column}" NOT IN ({quoted})'
 
-    def _range_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _range_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         if not column:
             raise ValueError("range_check requires target_column")
         min_val = config.get("min_value")
@@ -184,7 +185,7 @@ class SQLGenerator:
         where = " OR ".join(conditions)
         return f"SELECT COUNT(*) AS failed_count FROM {table_ref} WHERE {where}"
 
-    def _freshness_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _freshness_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         if not column:
             raise ValueError("freshness_check requires target_column")
         max_hours = config.get("max_hours", 24)
@@ -194,7 +195,7 @@ class SQLGenerator:
             f"THEN 1 ELSE 0 END AS failed_count FROM {table_ref}"
         )
 
-    def _volume_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _volume_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         date_col    = config.get("date_column", "created_at")
         min_rows    = config.get("min_rows")
         max_rows    = config.get("max_rows")
@@ -221,7 +222,7 @@ class SQLGenerator:
             f"FROM {table_ref} {filter_date}"
         )
 
-    def _schema_drift_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _schema_drift_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         expected = config.get("expected_columns", [])
         if not expected:
             return "SELECT 0 AS failed_count"
@@ -245,7 +246,7 @@ class SQLGenerator:
             f")"
         )
 
-    def _referential_integrity_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _referential_integrity_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         if not column:
             raise ValueError("referential_integrity_check requires target_column")
         ref_table = config.get("reference_table")
@@ -258,7 +259,7 @@ class SQLGenerator:
             f'WHERE p."{ref_column}" IS NULL'
         )
 
-    def _regex_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _regex_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         if not column:
             raise ValueError("regex_check requires target_column")
         pattern = config.get("pattern", "")
@@ -270,14 +271,14 @@ class SQLGenerator:
             f"WHERE NOT REGEXP_LIKE(\"{column}\", '{pattern}')"
         )
 
-    def _business_rule_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _business_rule_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         condition = config.get("condition")
         if not condition:
             raise ValueError("business_rule_check requires config.condition")
         _validate_condition(condition)
         return f"SELECT COUNT(*) AS failed_count FROM {table_ref} WHERE NOT ({condition})"
 
-    def _custom_sql_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _custom_sql_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         sql = config.get("sql")
         if not sql:
             raise ValueError("custom_sql_check requires config.sql")
@@ -285,7 +286,7 @@ class SQLGenerator:
 
     # ── §66 Semantic & Contextual Rule Types ─────────────────────────────────
 
-    def _semantic_consistency_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _semantic_consistency_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         """
         Cross-column logical consistency validated via a WHERE condition.
         config.condition: e.g. "end_date >= start_date"
@@ -297,7 +298,7 @@ class SQLGenerator:
         _validate_condition(condition)
         return f"SELECT COUNT(*) AS failed_count FROM {table_ref} WHERE NOT ({condition})"
 
-    def _business_metric_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _business_metric_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         """
         Validates a derived business metric stays within expected bounds.
         config.metric_sql: SQL expression returning a scalar (e.g. AVG(...))
@@ -322,7 +323,7 @@ class SQLGenerator:
             f"FROM {table_ref}"
         )
 
-    def _referential_sanity_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _referential_sanity_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         """
         Business-logic cross-table check expressed as a WHERE condition.
         Functionally identical to business_rule_check but named for clarity.
@@ -334,7 +335,7 @@ class SQLGenerator:
         _validate_condition(condition)
         return f"SELECT COUNT(*) AS failed_count FROM {table_ref} WHERE {condition}"
 
-    def _distribution_consistency_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _distribution_consistency_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         """
         Detects significant distribution shifts by comparing column statistics
         against a stored baseline.  Uses Population Stability Index (PSI) proxy:
@@ -362,7 +363,7 @@ class SQLGenerator:
             f"THEN 1 ELSE 0 END AS failed_count FROM {table_ref}"
         )
 
-    def _llm_semantic_check(self, config: dict, table_ref: str, column: str | None) -> str:
+    def _llm_semantic_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         """
         Samples rows for LLM-based semantic validation.
         Returns 0 AS failed_count — actual pass/fail requires LLM evaluation

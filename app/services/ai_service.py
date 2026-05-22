@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import json
 import re
 import logging
@@ -399,8 +401,8 @@ async def gather_platform_context(message: str, db: AsyncSession) -> dict:
 
 async def generate_rules(
     domain: str, subdomain: str, table_name: str,
-    columns: list[dict] | None, context: str | None,
-    provider_name: str | None, db: AsyncSession,
+    columns: Optional[list[dict]], context: Optional[str],
+    provider_name: Optional[str], db: AsyncSession,
 ) -> list[dict]:
     col_info = "\n".join(
         f"- {c['column_name']} ({c.get('data_type', 'unknown')})" for c in (columns or [])
@@ -424,7 +426,7 @@ async def generate_rules(
 # ── Failure explanation ───────────────────────────────────────────────────────
 
 async def explain_failure(
-    run_id: str, rule_id: str, provider_name: str | None, db: AsyncSession
+    run_id: str, rule_id: str, provider_name: Optional[str], db: AsyncSession
 ) -> str:
     run_res = await db.execute(select(DQRuleRun).where(DQRuleRun.run_id == run_id))
     run = run_res.scalar_one_or_none()
@@ -449,8 +451,8 @@ async def explain_failure(
 
 async def generate_sql(
     description: str, table_name: str, schema_name: str,
-    database_name: str | None, columns: list[dict] | None,
-    provider_name: str | None, db: AsyncSession,
+    database_name: Optional[str], columns: Optional[list[dict]],
+    provider_name: Optional[str], db: AsyncSession,
 ) -> str:
     table_ref = (
         f'"{database_name}"."{schema_name}"."{table_name}"'
@@ -472,8 +474,8 @@ async def generate_sql(
 
 async def classify_table(
     table_name: str, columns: list[dict],
-    provider_name: str | None, db: AsyncSession,
-    domain_names: list[str] | None = None,
+    provider_name: Optional[str], db: AsyncSession,
+    domain_names: Optional[list[str]] = None,
 ) -> dict:
     col_info = "\n".join(
         f"- {c['column_name']} ({c.get('data_type', 'unknown')})" for c in columns
@@ -501,7 +503,7 @@ async def suggest_data_quality_rules(
     table_name: str,
     columns_with_samples: list[dict],
     n_rules: int,
-    provider_name: str | None,
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> list[dict]:
     """Ask the LLM to suggest data quality rules for a table.
@@ -546,10 +548,10 @@ async def suggest_data_quality_rules(
 
 async def chat(
     message: str,
-    context: dict | None,
-    provider_name: str | None,
+    context: Optional[dict],
+    provider_name: Optional[str],
     db: AsyncSession,
-    history: list[dict] | None = None,
+    history: Optional[list[dict]] = None,
 ) -> str:
     if not context:
         context = await gather_platform_context(message, db)
@@ -572,7 +574,7 @@ async def chat(
 
 async def explain_incident(
     incident_id: str,
-    provider_name: str | None,
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> str:
     """Explain a quality incident aggregating all related rule run failures."""
@@ -652,7 +654,7 @@ async def explain_incident(
 
 async def generate_asset_description(
     asset_id: str,
-    provider_name: str | None,
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> str:
     """Generate and save a business description for a data asset using column metadata."""
@@ -705,7 +707,7 @@ async def generate_asset_description(
 
 async def generate_column_docs(
     asset_id: str,
-    provider_name: str | None,
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> dict:
     """Generate and save column descriptions for all columns on an asset."""
@@ -761,8 +763,8 @@ async def generate_column_docs(
 
 
 async def suggest_glossary_terms(
-    domain_id: str | None,
-    provider_name: str | None,
+    domain_id: Optional[str],
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> list[dict]:
     """Suggest new glossary terms based on asset names and existing glossary."""
@@ -805,7 +807,7 @@ async def suggest_glossary_terms(
 
 
 async def get_steward_review_queue(
-    provider_name: str | None,
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> dict:
     """Return AI-prioritised governance review queue with suggested actions."""
@@ -884,7 +886,7 @@ async def get_steward_review_queue(
 
 async def suggest_violation_resolution(
     violation_id: str,
-    provider_name: str | None,
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> str:
     """Draft a professional resolution note for a governance policy violation."""
@@ -934,7 +936,7 @@ async def suggest_violation_resolution(
 
 async def predict_asset_quality(
     asset_id: str,
-    provider_name: str | None,
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> dict:
     """Predict future data quality risk using LLM trend analysis on the last 60 runs."""
@@ -1091,7 +1093,7 @@ _REMEDIATION_HINTS: dict[str, str] = {
 
 async def generate_remediation_plan(
     asset_id: str,
-    provider_name: str | None,
+    provider_name: Optional[str],
     db: AsyncSession,
 ) -> dict:
     """Generate a structured remediation plan for an asset's recent failures."""

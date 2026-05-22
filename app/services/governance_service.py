@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Policy engine — evaluate all governance policies against all assets."""
 import logging
 from datetime import datetime, timezone

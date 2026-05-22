@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 """Simple Z-score anomaly detector using historical DQ rule run quality scores."""
 import logging
 import math
@@ -10,7 +12,7 @@ logger = logging.getLogger("dq_platform.anomaly")
 _utcnow = lambda: datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-async def run_zscore_detector(detector_id: str, db: AsyncSession) -> dict | None:
+async def run_zscore_detector(detector_id: str, db: AsyncSession) -> Optional[dict]:
     """
     Fetch the last 30 quality scores for this asset, compute mean+std,
     compare the latest score. Return detection dict or None if no anomaly.

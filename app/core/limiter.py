@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Rate limiting via slowapi.
 
 Global default: 120 requests/minute per key.

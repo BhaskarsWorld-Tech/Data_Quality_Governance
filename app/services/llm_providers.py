@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import logging
 from abc import ABC, abstractmethod
 
@@ -14,7 +16,7 @@ class LLMProvider(ABC):
     async def complete(
         self,
         prompt: str,
-        system: str | None = None,
+        system: Optional[str] = None,
         max_tokens: int = 1024,
     ) -> str:
         ...
@@ -30,7 +32,7 @@ class OllamaProvider(LLMProvider):
     async def complete(
         self,
         prompt: str,
-        system: str | None = None,
+        system: Optional[str] = None,
         max_tokens: int = 1024,
     ) -> str:
         import httpx
@@ -85,14 +87,14 @@ class OpenAIProvider(LLMProvider):
         # Create client once; avoids per-call construction overhead.
         if api_key:
             from openai import AsyncOpenAI
-            self._client: "AsyncOpenAI | None" = AsyncOpenAI(api_key=api_key)
+            self._client: "Optional[AsyncOpenAI]" = AsyncOpenAI(api_key=api_key)
         else:
             self._client = None
 
     async def complete(
         self,
         prompt: str,
-        system: str | None = None,
+        system: Optional[str] = None,
         max_tokens: int = 1024,
     ) -> str:
         if not self.api_key or self._client is None:
@@ -126,14 +128,14 @@ class ClaudeProvider(LLMProvider):
         # Create client once; avoids per-call construction overhead.
         if api_key:
             import anthropic
-            self._client: "anthropic.AsyncAnthropic | None" = anthropic.AsyncAnthropic(api_key=api_key)
+            self._client: "Optional[anthropic.AsyncAnthropic]" = anthropic.AsyncAnthropic(api_key=api_key)
         else:
             self._client = None
 
     async def complete(
         self,
         prompt: str,
-        system: str | None = None,
+        system: Optional[str] = None,
         max_tokens: int = 1024,
     ) -> str:
         if not self.api_key or self._client is None:
@@ -189,7 +191,7 @@ class GeminiProvider(LLMProvider):
     async def complete(
         self,
         prompt: str,
-        system: str | None = None,
+        system: Optional[str] = None,
         max_tokens: int = 1024,
     ) -> str:
         if not self.api_key:
@@ -220,7 +222,7 @@ class GeminiProvider(LLMProvider):
 
 # ── DB-aware factory ──────────────────────────────────────────────────────────
 
-async def get_provider_from_db(name: str | None, db) -> LLMProvider:
+async def get_provider_from_db(name: Optional[str], db) -> LLMProvider:
     """
     Build an LLM provider using settings from the app_config DB table.
     Falls back to environment variables if a key is missing from the DB.
@@ -268,7 +270,7 @@ async def get_provider_from_db(name: str | None, db) -> LLMProvider:
 
 
 # Kept for backward compatibility with any callers that don't have a DB session
-def get_provider(name: str | None = None) -> LLMProvider:
+def get_provider(name: Optional[str] = None) -> LLMProvider:
     from app.core.config import settings
     provider_name = (name or settings.llm_provider or "ollama").lower()
     if provider_name == "openai":

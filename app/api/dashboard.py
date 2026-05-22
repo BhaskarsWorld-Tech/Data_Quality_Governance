@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import csv
 import io
@@ -28,9 +29,9 @@ async def _get_today_runs(db: AsyncSession, filters: dict = {}):
 async def _build_trend(
     db: AsyncSession,
     days: int = 30,
-    domain_id: str | None = None,
-    subdomain_id: str | None = None,
-    asset_id: str | None = None,
+    domain_id: Optional[str] = None,
+    subdomain_id: Optional[str] = None,
+    asset_id: Optional[str] = None,
 ) -> list[dict]:
     """
     Build quality trend in 1–2 queries instead of one per day.
@@ -98,7 +99,7 @@ async def _build_trend(
     return trend
 
 
-async def _get_sla_breaches(db: AsyncSession, domain_scope: str | None = None) -> list[dict]:
+async def _get_sla_breaches(db: AsyncSession, domain_scope: Optional[str] = None) -> list[dict]:
     """
     Return top-5 tables whose 7-day average quality score is below 95.
     Shape: { table_name, schema_name, domain_name, score, days_below_sla }
@@ -171,7 +172,7 @@ async def _get_sla_breaches(db: AsyncSession, domain_scope: str | None = None) -
     return results[:5]
 
 
-async def _get_at_risk_tables(db: AsyncSession, domain_scope: str | None = None) -> list[dict]:
+async def _get_at_risk_tables(db: AsyncSession, domain_scope: Optional[str] = None) -> list[dict]:
     """
     Return bottom-5 tables by most-recent run quality score.
     Shape: { table_name, schema_name, domain_name, score, score_delta }
@@ -260,7 +261,7 @@ async def _get_at_risk_tables(db: AsyncSession, domain_scope: str | None = None)
     return results
 
 
-async def _get_recently_fixed(db: AsyncSession, domain_scope: str | None = None) -> list[dict]:
+async def _get_recently_fixed(db: AsyncSession, domain_scope: Optional[str] = None) -> list[dict]:
     """
     Rules that had a failing execution in the last 24h that now show a passing execution.
     Shape: { rule_name, table_name, domain_name, fixed_at, new_score }
@@ -740,7 +741,7 @@ async def global_trend(
 
 @router.get("/dimensions")
 async def quality_dimensions(
-    domain_id: str | None = Query(None),
+    domain_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -774,7 +775,7 @@ async def quality_dimensions(
                            "schema_drift_check"],
     }
 
-    result: dict[str, float | None] = {}
+    result: dict[str, Optional[float]] = {}
     for dim, rule_types in dimension_map.items():
         dim_rows = [r for r in rows if r.rule_type in rule_types]
         total = len(dim_rows)
@@ -827,8 +828,8 @@ async def platform_summary(db: AsyncSession = Depends(get_db)):
 
 @router.get("/export/runs")
 async def export_runs_csv(
-    domain_id: str | None = Query(None),
-    asset_id: str | None = Query(None),
+    domain_id: Optional[str] = Query(None),
+    asset_id: Optional[str] = Query(None),
     days: int = Query(30, le=90),
     db: AsyncSession = Depends(get_db),
 ):

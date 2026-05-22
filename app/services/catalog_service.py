@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Catalog service — search enrichment."""
 import logging
 from datetime import datetime, timezone

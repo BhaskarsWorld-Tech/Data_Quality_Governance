@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
@@ -30,7 +32,7 @@ async def create_agreement(payload: dict, db: AsyncSession = Depends(get_db), us
 
 
 @router.get("/sharing-agreements")
-async def list_agreements(domain_id: str | None = Query(None), db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
+async def list_agreements(domain_id: Optional[str] = Query(None), db: AsyncSession = Depends(get_db), _=Depends(get_current_user)):
     q = select(DataSharingAgreement).where(DataSharingAgreement.status == "active")
     if domain_id:
         q = q.where(or_(

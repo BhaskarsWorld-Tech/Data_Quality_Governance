@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -111,7 +113,7 @@ class BulkConfigUpdate(BaseModel):
 
 @router.get("")
 async def get_all_config(
-    category: str | None = Query(None),
+    category: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     if category:
@@ -196,7 +198,7 @@ async def test_llm(db: AsyncSession = Depends(get_db)):
             import httpx
             from app.core.config import settings as app_settings
 
-            async def _probe_ollama(target_url: str) -> list[str] | None:
+            async def _probe_ollama(target_url: str) -> Optional[list[str]]:
                 """Return model list if reachable, None if not."""
                 try:
                     async with httpx.AsyncClient(timeout=8) as client:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -144,9 +146,9 @@ async def configure_column_profile(
 
 @router.get("/rules-status")
 async def get_rules_schedule_status(
-    asset_id: str | None = Query(None),
-    subdomain_id: str | None = Query(None),
-    domain_id: str | None = Query(None),
+    asset_id: Optional[str] = Query(None),
+    subdomain_id: Optional[str] = Query(None),
+    domain_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -270,9 +272,9 @@ async def list_schedules_enriched(db: AsyncSession = Depends(get_db)):
 
 @router.get("", response_model=list[ScheduleResponse])
 async def list_schedules(
-    rule_id: str | None = Query(None),
-    asset_id: str | None = Query(None),
-    domain_id: str | None = Query(None),
+    rule_id: Optional[str] = Query(None),
+    asset_id: Optional[str] = Query(None),
+    domain_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(DQSchedule)

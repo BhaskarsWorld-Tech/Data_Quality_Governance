@@ -1,3 +1,4 @@
+from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -18,7 +19,7 @@ def _now() -> datetime:
 
 def _fmt_term(
     term: GlossaryTerm,
-    domain_name: str | None = None,
+    domain_name: Optional[str] = None,
     linked_asset_count: int = 0,
 ) -> dict:
     return {

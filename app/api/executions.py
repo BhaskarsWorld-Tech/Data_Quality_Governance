@@ -1,3 +1,4 @@
+from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -322,13 +323,13 @@ def _enrich_run(run: DQRuleRun, **extra) -> dict:
 
 @router.get("/runs/enriched")
 async def list_runs_enriched(
-    rule_id: str | None = Query(None),
-    asset_id: str | None = Query(None),
-    domain_id: str | None = Query(None),
-    subdomain_id: str | None = Query(None),
-    status: str | None = Query(None),
-    date_from: str | None = Query(None),
-    date_to: str | None = Query(None),
+    rule_id: Optional[str] = Query(None),
+    asset_id: Optional[str] = Query(None),
+    domain_id: Optional[str] = Query(None),
+    subdomain_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
     limit: int = Query(500, le=2000),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
@@ -389,10 +390,10 @@ async def list_runs_enriched(
 
 @router.get("/runs", response_model=list[RunResponse])
 async def list_runs(
-    rule_id: str | None = Query(None),
-    asset_id: str | None = Query(None),
-    domain_id: str | None = Query(None),
-    status: str | None = Query(None),
+    rule_id: Optional[str] = Query(None),
+    asset_id: Optional[str] = Query(None),
+    domain_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     limit: int = Query(50, le=500),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),

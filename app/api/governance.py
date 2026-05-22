@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
@@ -41,7 +43,7 @@ _DEFAULT_POLICIES = [
 ]
 
 
-async def _seed_default_policies(db: AsyncSession, user: dict | None = None) -> list[GovernancePolicy]:
+async def _seed_default_policies(db: AsyncSession, user: Optional[dict] = None) -> list[GovernancePolicy]:
     """Insert default governance policies if the table is empty. Idempotent."""
     from app.db.models import gen_uuid
     seeded = []
@@ -227,9 +229,9 @@ async def evaluate_policies_endpoint(
 
 @router.get("/violations")
 async def list_violations(
-    policy_id: str | None = Query(None),
-    entity_type: str | None = Query(None),
-    status: str | None = Query(None),
+    policy_id: Optional[str] = Query(None),
+    entity_type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Return violations enriched with policy metadata and asset context."""
@@ -301,7 +303,7 @@ async def resolve_violation(
 
 # ── Scorecards ────────────────────────────────────────────────────────────────
 
-async def _compute_domain_scorecard(domain_id: str, db: AsyncSession) -> dict | None:
+async def _compute_domain_scorecard(domain_id: str, db: AsyncSession) -> Optional[dict]:
     """Compute a 6-dimension governance scorecard for one domain."""
     domain_result = await db.execute(select(Domain).where(Domain.domain_id == domain_id))
     domain = domain_result.scalar_one_or_none()
@@ -407,7 +409,7 @@ async def get_scorecard(domain_id: str, db: AsyncSession = Depends(get_db)):
     return sc
 
 
-async def _compute_subdomain_scorecard(subdomain_id: str, db: AsyncSession) -> dict | None:
+async def _compute_subdomain_scorecard(subdomain_id: str, db: AsyncSession) -> Optional[dict]:
     """Compute a 6-dimension governance scorecard for one subdomain."""
     sd_result = await db.execute(select(Subdomain).where(Subdomain.subdomain_id == subdomain_id))
     subdomain = sd_result.scalar_one_or_none()

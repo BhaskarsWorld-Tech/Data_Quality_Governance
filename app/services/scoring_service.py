@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import Optional
+
 import logging
 import uuid
 from datetime import datetime, timezone, date
@@ -29,7 +32,7 @@ def calculate_aggregate_score(rule_results: list[dict]) -> float:
 
 
 def calculate_score_from_counts(
-    passed: int, failed: int, warning: int, error: int, severity_map: dict[str, str] | None = None
+    passed: int, failed: int, warning: int, error: int, severity_map: Optional[dict[str, str]] = None
 ) -> float:
     total = passed + failed + warning + error
     if total == 0:
@@ -38,7 +41,7 @@ def calculate_score_from_counts(
     return round(score, 2)
 
 
-async def aggregate_quality_scores(db: AsyncSession, run_date: date | None = None) -> None:
+async def aggregate_quality_scores(db: AsyncSession, run_date: Optional[date] = None) -> None:
     """
     Compute and persist aggregated quality scores in dq_quality_scores for today.
     Called after each rule execution batch.
@@ -132,7 +135,7 @@ async def aggregate_quality_scores(db: AsyncSession, run_date: date | None = Non
     logger.info(f"Aggregated {len(score_records)} quality score records for {target_date}")
 
 
-async def check_sla_breaches(db: AsyncSession, run_date: date | None = None) -> list[dict]:
+async def check_sla_breaches(db: AsyncSession, run_date: Optional[date] = None) -> list[dict]:
     """Check dq_quality_scores against SLA configs and return breaches."""
     from app.db.models import DQQualityScore, SLAConfig
 

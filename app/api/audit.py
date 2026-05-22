@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import csv
 import io
 from datetime import datetime, timezone
@@ -15,10 +17,10 @@ router = APIRouter(prefix="/audit", tags=["Audit"])
 
 @router.get("")
 async def list_audit_logs(
-    entity_type: str | None = Query(None),
-    entity_id: str | None = Query(None),
-    user_email: str | None = Query(None),
-    action: str | None = Query(None),
+    entity_type: Optional[str] = Query(None),
+    entity_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
     limit: int = Query(50, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -59,9 +61,9 @@ async def list_audit_logs(
 
 @router.get("/export")
 async def export_audit_csv(
-    entity_type: str | None = Query(None),
-    user_email: str | None = Query(None),
-    action: str | None = Query(None),
+    entity_type: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
     days: int = Query(30, le=365),
     db: AsyncSession = Depends(get_db),
     _=Depends(get_current_user),

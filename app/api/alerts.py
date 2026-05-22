@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
@@ -29,9 +31,9 @@ def _fmt(alert: DQAlert, extra: dict = {}) -> dict:
 
 @router.get("")
 async def list_alerts(
-    status: str | None = Query(None),
-    domain_id: str | None = Query(None),
-    severity: str | None = Query(None),
+    status: Optional[str] = Query(None),
+    domain_id: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -49,9 +51,9 @@ async def list_alerts(
 
 @router.get("/enriched")
 async def list_alerts_enriched(
-    status: str | None = Query(None),
-    domain_id: str | None = Query(None),
-    severity: str | None = Query(None),
+    status: Optional[str] = Query(None),
+    domain_id: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):

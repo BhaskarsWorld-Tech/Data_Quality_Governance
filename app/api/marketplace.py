@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -111,10 +113,10 @@ async def featured_templates(db: AsyncSession = Depends(get_db), _=Depends(get_c
 
 @router.get("/templates")
 async def list_templates(
-    industry: str | None = Query(None),
-    domain: str | None = Query(None),
-    rule_type: str | None = Query(None),
-    is_public: bool | None = Query(None),
+    industry: Optional[str] = Query(None),
+    domain: Optional[str] = Query(None),
+    rule_type: Optional[str] = Query(None),
+    is_public: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
     _=Depends(get_current_user),
 ):

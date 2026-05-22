@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 import asyncio
 import logging
 import sqlglot
@@ -86,7 +88,7 @@ async def _enrich(asset: DataAsset, db: AsyncSession) -> dict:
     }
 
 
-def _sync_fetch_view_definition(conn: SnowflakeConnection, asset: DataAsset) -> str | None:
+def _sync_fetch_view_definition(conn: SnowflakeConnection, asset: DataAsset) -> Optional[str]:
     """Synchronous Snowflake call — run via asyncio.to_thread."""
     try:
         from app.api.connections import _open_connector

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
@@ -59,9 +61,9 @@ def _fmt_runbook(r: IncidentRunbook) -> dict:
 
 @router.get("/incidents")
 async def list_incidents(
-    status: str | None = Query(None),
-    asset_id: str | None = Query(None),
-    severity: str | None = Query(None),
+    status: Optional[str] = Query(None),
+    asset_id: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     q = (
@@ -272,7 +274,7 @@ async def delete_oncall(
 
 @router.get("/runbooks")
 async def list_runbooks(
-    rule_id: str | None = Query(None),
+    rule_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(IncidentRunbook)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -18,8 +20,8 @@ router = APIRouter(prefix="/assets", tags=["Data Assets"])
 
 @router.get("/enriched")
 async def list_assets_enriched(
-    domain_id: str | None = Query(None),
-    subdomain_id: str | None = Query(None),
+    domain_id: Optional[str] = Query(None),
+    subdomain_id: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -99,8 +101,8 @@ async def create_asset(payload: DataAssetCreate, db: AsyncSession = Depends(get_
 
 @router.get("")
 async def list_assets(
-    domain_id: str | None = Query(None),
-    subdomain_id: str | None = Query(None),
+    domain_id: Optional[str] = Query(None),
+    subdomain_id: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db)

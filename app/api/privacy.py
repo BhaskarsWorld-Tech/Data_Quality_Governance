@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 """
 Privacy Engineering API — §62
 Masking policies and PII data management.
@@ -28,7 +30,7 @@ def _fmt(p: MaskingPolicy) -> dict:
 
 @router.get("/masking-policies")
 async def list_masking_policies(
-    asset_id: str | None = None,
+    asset_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
