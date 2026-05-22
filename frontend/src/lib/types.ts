@@ -53,6 +53,7 @@ export interface Rule {
   enabled: boolean
   status: RuleStatus
   severity: 'critical' | 'high' | 'medium' | 'low'
+  scope: 'generic' | 'object-specific'
   createdAt: string
   lastRunAt?: string
   lastRunStatus?: 'passed' | 'failed' | 'warning' | 'error'
@@ -76,6 +77,7 @@ export interface CheckResult {
   ruleCategory?: RuleCategory
   severity?: 'critical' | 'high' | 'medium' | 'low'
   scope?: 'generic' | 'object-specific'
+  sql?: string
 }
 
 export interface Report {

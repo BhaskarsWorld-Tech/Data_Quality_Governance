@@ -1,16 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/store'
 import { generateId } from '@/lib/utils'
-import { Report, CheckResult, RuleType } from '@/lib/types'
+import { Report, CheckResult, Rule } from '@/lib/types'
 
-/* Rule scope classification */
-const GENERIC_RULE_TYPES: RuleType[] = [
-  'not_null', 'unique', 'range', 'regex', 'freshness', 'row_count',
-  'null_check', 'uniqueness_check', 'duplicate_check', 'accepted_values_check',
-  'range_check', 'freshness_check', 'volume_check', 'regex_check',
-]
-function ruleScope(type: RuleType): 'generic' | 'object-specific' {
-  return GENERIC_RULE_TYPES.includes(type) ? 'generic' : 'object-specific'
+/* Generate a realistic SQL preview based on rule type */
+function generateSQL(rule: Rule): string {
+  const table = rule.tableName
+  const col = rule.columnName || 'column'
+  const p = rule.parameters || {}
+
+  switch (rule.type) {
+    case 'null_check':
+    case 'not_null':
+      return `SELECT COUNT(*) AS failed_count\nFROM ${table}\nWHERE "${col}" IS NULL`
+    case 'uniqueness_check':
+    case 'unique':
+      return `SELECT "${col}", COUNT(*) AS cnt\nFROM ${table}\nGROUP BY "${col}"\nHAVING COUNT(*) > 1`
+    case 'duplicate_check':
+      return `SELECT "${col}", COUNT(*) AS dup_count\nFROM ${table}\nGROUP BY "${col}"\nHAVING COUNT(*) > 1`
+    case 'range_check':
+    case 'range':
+      return `SELECT COUNT(*) AS out_of_range\nFROM ${table}\nWHERE "${col}" < ${p.min ?? 0}\n   OR "${col}" > ${p.max ?? 999999}`
+    case 'regex_check':
+    case 'regex':
+      return `SELECT COUNT(*) AS invalid_format\nFROM ${table}\nWHERE NOT REGEXP_LIKE("${col}", '${p.pattern || '.*'}')`
+    case 'freshness_check':
+    case 'freshness':
+      return `SELECT DATEDIFF('hour', MAX("${col}"), CURRENT_TIMESTAMP()) AS hours_since_update\nFROM ${table}\n-- Threshold: ${p.maxAgeHours || 24} hours`
+    case 'volume_check':
+    case 'row_count':
+      return `SELECT COUNT(*) AS row_count\nFROM ${table}\n-- Min expected: ${p.minRows || 1} rows`
+    case 'accepted_values_check':
+      const vals = (p.values as string[] || []).map(v => `'${v}'`).join(', ')
+      return `SELECT COUNT(*) AS invalid_values\nFROM ${table}\nWHERE "${col}" NOT IN (${vals})`
+    case 'referential_integrity_check':
+    case 'referential':
+      return `SELECT COUNT(*) AS orphaned_rows\nFROM ${table} t\nLEFT JOIN ${p.referencedTable || 'ref_table'} r\n  ON t."${col}" = r."${p.referencedColumn || col}"\nWHERE r."${p.referencedColumn || col}" IS NULL\n  AND t."${col}" IS NOT NULL`
+    case 'schema_drift_check':
+      return `SELECT COUNT(*) AS column_count\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_NAME = '${table}'\n-- Expected: ${p.expectedColumns || '?'} columns`
+    case 'business_rule_check':
+      return String(p.sql || `-- Business rule check on ${table}`)
+    case 'custom_sql_check':
+      return String(p.sql || `-- Custom SQL check on ${table}`)
+    case 'business_metric_check':
+      return `-- Metric: ${p.metric || 'custom'}\nSELECT AVG(TOTAL_AMOUNT) AS metric_value\nFROM ${table}\n-- Expected range: ${p.min ?? '?'} - ${p.max ?? '?'}`
+    default:
+      return `-- ${rule.type} check on ${table}.${col}`
+  }
 }
 
 /* Human-readable rule type label */
@@ -48,6 +84,7 @@ export async function POST(req: NextRequest) {
     const recordsChecked = Math.floor(Math.random() * 100000) + 10000
     const recordsFailed = score < 95 ? Math.floor(recordsChecked * (1 - score / 100)) : 0
     const status = score >= 98 ? 'passed' : score >= 90 ? 'warning' : 'failed'
+    const sql = generateSQL(rule)
 
     return {
       ruleId: rule.id,
@@ -61,11 +98,12 @@ export async function POST(req: NextRequest) {
       recordsFailed,
       executedAt: new Date().toISOString(),
       duration: Math.floor(Math.random() * 3000) + 500,
-      details: `Checked ${recordsChecked.toLocaleString()} records · Rule type: ${ruleTypeLabel(rule.type)} · Category: ${rule.category}`,
+      details: `Rule: ${rule.name} | Type: ${ruleTypeLabel(rule.type)} | Category: ${rule.category} | Scope: ${rule.scope} | Target: ${rule.tableName}${rule.columnName ? '.' + rule.columnName : ''} | Connection: ${conn?.name || 'Unknown'}`,
       ruleType: rule.type,
       ruleCategory: rule.category,
       severity: rule.severity,
-      scope: ruleScope(rule.type),
+      scope: rule.scope,
+      sql,
     }
   })
 
@@ -98,6 +136,15 @@ export async function POST(req: NextRequest) {
     executedAt: new Date().toISOString(),
     results,
     trend
+  }
+
+  // Update rule last run info
+  for (const result of results) {
+    store.rules.update(result.ruleId, {
+      lastRunAt: result.executedAt,
+      lastRunStatus: result.status,
+      lastRunScore: result.score,
+    })
   }
 
   store.reports.create(report)

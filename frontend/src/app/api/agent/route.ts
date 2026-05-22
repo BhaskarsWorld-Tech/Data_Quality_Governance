@@ -146,6 +146,7 @@ async function executeTool(toolName: string, input: Record<string, unknown>): Pr
         enabled: true,
         status: 'active' as const,
         severity: input.severity as Rule['severity'],
+        scope: (input.scope as Rule['scope']) || 'generic',
         createdAt: new Date().toISOString()
       }
       store.rules.create(rule)

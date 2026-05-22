@@ -492,9 +492,10 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
                           <div style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>Executed SQL</div>
                           <pre style={{
                             background: '#1e293b', color: '#86efac', padding: '12px 14px', borderRadius: '8px',
-                            fontSize: '11.5px', fontFamily: 'monospace', overflow: 'auto', lineHeight: 1.5, maxHeight: '120px',
+                            fontSize: '11.5px', fontFamily: 'monospace', overflow: 'auto', lineHeight: 1.5, maxHeight: '140px',
+                            whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                           }}>
-                            {`SELECT COUNT(*) AS failed_count\nFROM ${r.tableName}\nWHERE ${r.columnName || 'column'} IS NULL\n  OR ${r.columnName || 'column'} NOT IN (valid_values)`}
+                            {r.sql || `SELECT COUNT(*) AS failed_count\nFROM ${r.tableName}\nWHERE ${r.columnName || 'column'} IS NULL`}
                           </pre>
                         </div>
 
