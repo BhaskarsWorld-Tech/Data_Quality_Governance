@@ -12,7 +12,8 @@ interface LineageNode {
 }
 interface LineageEdge { from: string; to: string; relationship: string }
 interface ConnectionInfo { name: string; database: string; schema: string; warehouse: string; status: string }
-interface LineageData { nodes: LineageNode[]; edges: LineageEdge[]; connection: ConnectionInfo }
+interface LineageMeta { edgeMethods?: { fk: number; ddl: number; heuristic: number }; totalTables?: number; totalEdges?: number }
+interface LineageData { nodes: LineageNode[]; edges: LineageEdge[]; connection: ConnectionInfo; meta?: LineageMeta }
 interface ColumnInfo { COLUMN_NAME: string; DATA_TYPE: string; IS_NULLABLE: string; ORDINAL_POSITION: number; CHARACTER_MAXIMUM_LENGTH?: number; NUMERIC_PRECISION?: number; COLUMN_DEFAULT?: string; COMMENT?: string }
 
 /* ─── Static fallback ─── */
@@ -281,18 +282,24 @@ export default function LineagePage() {
   const laidOut = layoutNodes(data.nodes, data.edges)
   const nodeMap = new Map(laidOut.map(n => [n.id, n]))
 
-  // Layer labels
+  // Layer labels — pick the dominant type in each layer column
   const layerLabels: Record<number, string> = {}
+  const layerTypeCounts = new Map<number, Map<string, number>>()
   laidOut.forEach(n => {
     const layer = Math.round(((n.x ?? 0) - 60) / 290)
-    if (!(layer in layerLabels)) {
-      if (n.type === 'source') layerLabels[layer] = 'SOURCE'
-      else if (n.type === 'warehouse') layerLabels[layer] = 'MASTER DATA'
-      else if (n.type === 'transform') layerLabels[layer] = 'TRANSACTIONS'
-      else if (n.type === 'output') layerLabels[layer] = 'VIEWS'
-      else layerLabels[layer] = n.type.toUpperCase()
-    }
+    if (!layerTypeCounts.has(layer)) layerTypeCounts.set(layer, new Map())
+    const counts = layerTypeCounts.get(layer)!
+    counts.set(n.type, (counts.get(n.type) ?? 0) + 1)
   })
+  for (const [layer, counts] of layerTypeCounts) {
+    let dominant = 'warehouse'
+    let maxCount = 0
+    for (const [type, count] of counts) {
+      if (count > maxCount) { dominant = type; maxCount = count }
+    }
+    const labelMap: Record<string, string> = { source: 'SOURCE', warehouse: 'MASTER DATA', transform: 'TRANSACTIONS', output: 'VIEWS', raw: 'RAW' }
+    layerLabels[layer] = labelMap[dominant] || dominant.toUpperCase()
+  }
 
   const maxX = Math.max(...laidOut.map(n => (n.x ?? 0) + NODE_W)) + 80
   const maxY = Math.max(...laidOut.map(n => (n.y ?? 0) + NODE_H)) + 80
@@ -341,8 +348,17 @@ export default function LineagePage() {
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Data Lineage</h1>
           <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0' }}>
             {isLive
-              ? `Live from ${data.connection.name} · ${data.connection.database}.${data.connection.schema} · ${laidOut.length} objects`
+              ? `Live from ${data.connection.name} · ${data.connection.database}.${data.connection.schema} · ${laidOut.length} objects · ${data.edges.length} relationships`
               : 'Demo mode · connect a Snowflake warehouse for live lineage'}
+            {isLive && data.meta?.edgeMethods && (
+              <span style={{ marginLeft: '8px', fontSize: '11px', color: '#94a3b8' }}>
+                ({[
+                  data.meta.edgeMethods.fk > 0 && `${data.meta.edgeMethods.fk} FK`,
+                  data.meta.edgeMethods.ddl > 0 && `${data.meta.edgeMethods.ddl} DDL`,
+                  data.meta.edgeMethods.heuristic > 0 && `${data.meta.edgeMethods.heuristic} inferred`,
+                ].filter(Boolean).join(', ') || 'source only'})
+              </span>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
