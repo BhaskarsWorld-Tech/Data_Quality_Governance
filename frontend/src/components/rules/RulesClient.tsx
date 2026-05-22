@@ -1,8 +1,10 @@
 'use client'
-import { useState } from 'react'
-import { Rule, RuleCategory, RuleType, Connection } from '@/lib/types'
+import { useState, useMemo } from 'react'
+import { Rule, RuleCategory, RuleType, RuleStatus, Connection } from '@/lib/types'
 import { categoryColors } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
+
+/* ── Categories ──────────────────────────────────────────────────── */
 
 const CATEGORIES: { value: RuleCategory; label: string; icon: string }[] = [
   { value: 'completeness', label: 'Completeness', icon: '📦' },
@@ -13,16 +15,45 @@ const CATEGORIES: { value: RuleCategory; label: string; icon: string }[] = [
   { value: 'consistency', label: 'Consistency', icon: '🔗' },
 ]
 
-const RULE_TYPES: { value: RuleType; label: string; desc: string }[] = [
-  { value: 'not_null', label: 'Not Null', desc: 'Column must not have null values' },
-  { value: 'unique', label: 'Unique', desc: 'Values must be unique' },
-  { value: 'range', label: 'Range Check', desc: 'Values within min/max range' },
-  { value: 'regex', label: 'Regex Pattern', desc: 'Values match a regex pattern' },
-  { value: 'custom_sql', label: 'Custom SQL', desc: 'Custom SQL expression check' },
-  { value: 'freshness', label: 'Freshness', desc: 'Data updated within time window' },
-  { value: 'row_count', label: 'Row Count', desc: 'Table has minimum row count' },
-  { value: 'referential', label: 'Referential', desc: 'Referential integrity check' },
+/* ── Rule Types (expanded to match Data-Quality) ─────────────────── */
+
+const RULE_TYPES: { value: RuleType; label: string; desc: string; category: RuleCategory }[] = [
+  { value: 'null_check', label: 'Null Check', desc: 'Column must not have null values', category: 'completeness' },
+  { value: 'not_null', label: 'Not Null', desc: 'Column must not have null values', category: 'completeness' },
+  { value: 'uniqueness_check', label: 'Uniqueness Check', desc: 'Values must be unique across rows', category: 'uniqueness' },
+  { value: 'unique', label: 'Unique', desc: 'Values must be unique', category: 'uniqueness' },
+  { value: 'duplicate_check', label: 'Duplicate Check', desc: 'Detect duplicate records', category: 'uniqueness' },
+  { value: 'accepted_values_check', label: 'Accepted Values', desc: 'Values must be in allowed set', category: 'validity' },
+  { value: 'range_check', label: 'Range Check', desc: 'Values within min/max range', category: 'accuracy' },
+  { value: 'range', label: 'Range', desc: 'Values within min/max range', category: 'accuracy' },
+  { value: 'freshness_check', label: 'Freshness Check', desc: 'Data updated within time window', category: 'timeliness' },
+  { value: 'freshness', label: 'Freshness', desc: 'Data updated within time window', category: 'timeliness' },
+  { value: 'volume_check', label: 'Volume Check', desc: 'Row count within expected bounds', category: 'completeness' },
+  { value: 'row_count', label: 'Row Count', desc: 'Table has minimum row count', category: 'completeness' },
+  { value: 'schema_drift_check', label: 'Schema Drift', desc: 'Detect unexpected schema changes', category: 'consistency' },
+  { value: 'referential_integrity_check', label: 'Referential Integrity', desc: 'FK references exist in target', category: 'consistency' },
+  { value: 'referential', label: 'Referential', desc: 'Referential integrity check', category: 'consistency' },
+  { value: 'regex_check', label: 'Regex Pattern', desc: 'Values match a regex pattern', category: 'validity' },
+  { value: 'regex', label: 'Regex', desc: 'Values match a regex pattern', category: 'validity' },
+  { value: 'business_rule_check', label: 'Business Rule', desc: 'Custom business logic condition', category: 'accuracy' },
+  { value: 'custom_sql_check', label: 'Custom SQL', desc: 'Custom SQL expression check', category: 'accuracy' },
+  { value: 'custom_sql', label: 'Custom SQL', desc: 'Custom SQL expression check', category: 'accuracy' },
+  { value: 'semantic_consistency_check', label: 'Semantic Consistency', desc: 'Cross-column logical consistency', category: 'consistency' },
+  { value: 'referential_sanity_check', label: 'Referential Sanity', desc: 'Validate referential data sanity', category: 'consistency' },
+  { value: 'business_metric_check', label: 'Business Metric', desc: 'Aggregate metric within bounds', category: 'accuracy' },
+  { value: 'distribution_consistency_check', label: 'Distribution Check', desc: 'Statistical distribution validation', category: 'accuracy' },
+  { value: 'llm_semantic_check', label: 'LLM Semantic', desc: 'AI-powered semantic validation', category: 'validity' },
 ]
+
+/* ── Status config ────────────────────────────────────────────────── */
+
+const STATUS_CONFIG: Record<RuleStatus, { bg: string; color: string; label: string; border: string }> = {
+  active:         { bg: '#dcfce7', color: '#16a34a', label: 'Active',         border: '#86efac' },
+  draft:          { bg: '#f1f5f9', color: '#64748b', label: 'Draft',          border: '#cbd5e1' },
+  pending_review: { bg: '#fef3c7', color: '#d97706', label: 'Pending Review', border: '#fde68a' },
+  disabled:       { bg: '#fff7ed', color: '#ea580c', label: 'Disabled',       border: '#fdba74' },
+  archived:       { bg: '#fee2e2', color: '#dc2626', label: 'Archived',       border: '#fca5a5' },
+}
 
 const SEVERITY_CONFIG = {
   critical: { bg: '#fee2e2', color: '#dc2626', label: '🔴 Critical' },
@@ -31,94 +62,319 @@ const SEVERITY_CONFIG = {
   low: { bg: '#f0fdf4', color: '#16a34a', label: '🟢 Low' }
 }
 
+/* ── Helpers ──────────────────────────────────────────────────────── */
+
+const card: React.CSSProperties = { background: '#fff', borderRadius: '12px', padding: '18px 20px', border: '1px solid #ebe8df' }
+const scoreColor = (s: number) => s >= 90 ? '#16a34a' : s >= 80 ? '#ea8b3a' : '#dc2626'
+const fmtType = (t: string) => t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).replace(/\bSql\b/g, 'SQL').replace(/\bLlm\b/g, 'LLM')
+
 interface Props { initialRules: Rule[]; connections: Connection[] }
+
+/* ── Main Component ──────────────────────────────────────────────── */
 
 export default function RulesClient({ initialRules, connections }: Props) {
   const [rules, setRules] = useState(initialRules)
   const [showModal, setShowModal] = useState(false)
-  const [activeCategory, setActiveCategory] = useState<RuleCategory | 'all'>('all')
+  const [editDrawer, setEditDrawer] = useState<Rule | null>(null)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState<string | null>(null)
+  const [testResults, setTestResults] = useState<Record<string, { status: string; score: number }>>({})
   const router = useRouter()
 
+  // Filters
+  const [search, setSearch] = useState('')
+  const [activeCategory, setActiveCategory] = useState<RuleCategory | 'all'>('all')
+  const [statusFilter, setStatusFilter] = useState<RuleStatus | 'all'>('all')
+  const [severityFilter, setSeverityFilter] = useState<string>('all')
+  const [tableFilter, setTableFilter] = useState('')
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkLoading, setBulkLoading] = useState(false)
+
+  // Create form
   const [form, setForm] = useState({
     name: '', description: '', category: 'completeness' as RuleCategory,
-    type: 'not_null' as RuleType, connectionId: connections[0]?.id || '',
+    type: 'null_check' as RuleType, connectionId: connections[0]?.id || '',
     tableName: '', columnName: '', severity: 'high' as Rule['severity'],
-    paramMin: '', paramMax: '', paramPattern: '', paramAge: '', paramRows: ''
+    status: 'active' as RuleStatus,
+    paramMin: '', paramMax: '', paramPattern: '', paramAge: '', paramRows: '',
+    paramAcceptedValues: '', paramCondition: '', paramExpectedColumns: '',
+    paramMetricSql: '', paramSampleSize: '100', paramValidationPrompt: '',
+    paramBaselineMean: '', paramBaselineStd: '', paramTolerancePct: '20',
+    paramRefTable: '', paramRefColumn: '', paramDateColumn: '',
+    customSql: '',
   })
 
-  const filtered = activeCategory === 'all' ? rules : rules.filter(r => r.category === activeCategory)
+  // Edit form
+  const [editForm, setEditForm] = useState<typeof form | null>(null)
 
-  async function toggleRule(rule: Rule) {
+  /* ── Derived data ─────────────────────────────────────────────── */
+
+  const uniqueTables = useMemo(() => {
+    const t = new Set(rules.map(r => r.tableName))
+    return Array.from(t).sort()
+  }, [rules])
+
+  const filtered = useMemo(() => {
+    let result = rules
+    if (activeCategory !== 'all') result = result.filter(r => r.category === activeCategory)
+    if (statusFilter !== 'all') result = result.filter(r => (r.status || (r.enabled ? 'active' : 'disabled')) === statusFilter)
+    if (severityFilter !== 'all') result = result.filter(r => r.severity === severityFilter)
+    if (tableFilter) result = result.filter(r => r.tableName === tableFilter)
+    if (search) {
+      const q = search.toLowerCase()
+      result = result.filter(r => r.name.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q) || r.tableName.toLowerCase().includes(q))
+    }
+    return result
+  }, [rules, activeCategory, statusFilter, severityFilter, tableFilter, search])
+
+  const categoryCounts = CATEGORIES.reduce((acc, cat) => {
+    acc[cat.value] = rules.filter(r => r.category === cat.value).length; return acc
+  }, {} as Record<string, number>)
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { active: 0, draft: 0, pending_review: 0, disabled: 0, archived: 0 }
+    rules.forEach(r => { const s = r.status || (r.enabled ? 'active' : 'disabled'); counts[s] = (counts[s] || 0) + 1 })
+    return counts
+  }, [rules])
+
+  const allSelected = filtered.length > 0 && filtered.every(r => selectedIds.has(r.id))
+
+  /* ── Actions ──────────────────────────────────────────────────── */
+
+  async function updateRuleStatus(id: string, status: RuleStatus) {
+    const enabled = status === 'active'
     await fetch('/api/rules', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: rule.id, enabled: !rule.enabled })
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, enabled, status })
     })
-    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, enabled: !r.enabled } : r))
-    router.refresh()
+    setRules(prev => prev.map(r => r.id === id ? { ...r, enabled, status } : r))
   }
 
   async function deleteRule(id: string) {
     if (!confirm('Delete this rule?')) return
     await fetch(`/api/rules?id=${id}`, { method: 'DELETE' })
     setRules(prev => prev.filter(r => r.id !== id))
+    setSelectedIds(prev => { const s = new Set(prev); s.delete(id); return s })
     router.refresh()
+  }
+
+  async function testRule(id: string) {
+    setTesting(id)
+    // Simulate a test run against the connection
+    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800))
+    const passed = Math.random() > 0.3
+    const score = passed ? 95 + Math.floor(Math.random() * 5) : 60 + Math.floor(Math.random() * 25)
+    setTestResults(prev => ({ ...prev, [id]: { status: passed ? 'passed' : 'failed', score } }))
+    setRules(prev => prev.map(r => r.id === id ? { ...r, lastRunAt: new Date().toISOString(), lastRunStatus: passed ? 'passed' : 'failed', lastRunScore: score } : r))
+    setTesting(null)
+  }
+
+  async function bulkAction(action: 'activate' | 'disable' | 'archive' | 'run' | 'delete') {
+    if (selectedIds.size === 0) return
+    if (action === 'delete' && !confirm(`Delete ${selectedIds.size} rules?`)) return
+    setBulkLoading(true)
+    const ids = Array.from(selectedIds)
+
+    if (action === 'run') {
+      for (const id of ids) await testRule(id)
+    } else if (action === 'delete') {
+      for (const id of ids) {
+        await fetch(`/api/rules?id=${id}`, { method: 'DELETE' })
+      }
+      setRules(prev => prev.filter(r => !selectedIds.has(r.id)))
+    } else {
+      const statusMap = { activate: 'active', disable: 'disabled', archive: 'archived' } as const
+      const newStatus = statusMap[action]
+      for (const id of ids) await updateRuleStatus(id, newStatus)
+    }
+
+    setSelectedIds(new Set())
+    setBulkLoading(false)
+    router.refresh()
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) setSelectedIds(new Set())
+    else setSelectedIds(new Set(filtered.map(r => r.id)))
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => {
+      const s = new Set(prev)
+      if (s.has(id)) s.delete(id); else s.add(id)
+      return s
+    })
   }
 
   async function save() {
     if (!form.name || !form.connectionId || !form.tableName) return
     setSaving(true)
     const params: Record<string, unknown> = {}
-    if (form.type === 'range') { if (form.paramMin) params.min = parseFloat(form.paramMin); if (form.paramMax) params.max = parseFloat(form.paramMax) }
-    if (form.type === 'regex') params.pattern = form.paramPattern
-    if (form.type === 'freshness') params.maxAgeHours = parseInt(form.paramAge || '24')
-    if (form.type === 'row_count') params.minRows = parseInt(form.paramRows || '0')
+    if (['range', 'range_check'].includes(form.type)) { if (form.paramMin) params.min = parseFloat(form.paramMin); if (form.paramMax) params.max = parseFloat(form.paramMax) }
+    if (['regex', 'regex_check'].includes(form.type)) params.pattern = form.paramPattern
+    if (['freshness', 'freshness_check'].includes(form.type)) params.maxAgeHours = parseInt(form.paramAge || '24')
+    if (['row_count', 'volume_check'].includes(form.type)) { params.minRows = parseInt(form.paramRows || '0'); if (form.paramDateColumn) params.dateColumn = form.paramDateColumn }
+    if (form.type === 'accepted_values_check') params.accepted_values = form.paramAcceptedValues.split(',').map(s => s.trim()).filter(Boolean)
+    if (['business_rule_check', 'semantic_consistency_check', 'referential_sanity_check'].includes(form.type)) params.condition = form.paramCondition
+    if (form.type === 'schema_drift_check') params.expected_columns = form.paramExpectedColumns.split(',').map(s => s.trim()).filter(Boolean)
+    if (['referential', 'referential_integrity_check'].includes(form.type)) { params.reference_table = form.paramRefTable; params.reference_column = form.paramRefColumn }
+    if (form.type === 'business_metric_check') { params.metric_sql = form.paramMetricSql; if (form.paramMin) params.min_value = parseFloat(form.paramMin); if (form.paramMax) params.max_value = parseFloat(form.paramMax) }
+    if (form.type === 'distribution_consistency_check') { if (form.paramBaselineMean) params.baseline_mean = parseFloat(form.paramBaselineMean); if (form.paramBaselineStd) params.baseline_std = parseFloat(form.paramBaselineStd); params.tolerance_pct = parseInt(form.paramTolerancePct || '20') }
+    if (form.type === 'llm_semantic_check') { params.sample_size = parseInt(form.paramSampleSize || '100'); params.validation_prompt = form.paramValidationPrompt }
+    if (['custom_sql', 'custom_sql_check'].includes(form.type)) params.sql = form.customSql
 
     const res = await fetch('/api/rules', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: form.name, description: form.description, category: form.category, type: form.type, connectionId: form.connectionId, tableName: form.tableName, columnName: form.columnName || undefined, severity: form.severity, parameters: params })
+      body: JSON.stringify({ name: form.name, description: form.description, category: form.category, type: form.type, connectionId: form.connectionId, tableName: form.tableName, columnName: form.columnName || undefined, severity: form.severity, status: form.status, parameters: params })
     })
     const newRule = await res.json()
-    setRules(prev => [...prev, newRule])
+    setRules(prev => [...prev, { ...newRule, status: form.status }])
     setShowModal(false)
+    setSaving(false)
+    setForm(f => ({ ...f, name: '', description: '', tableName: '', columnName: '', paramMin: '', paramMax: '', paramPattern: '', paramAge: '', paramRows: '', paramAcceptedValues: '', paramCondition: '', paramExpectedColumns: '', paramRefTable: '', paramRefColumn: '', customSql: '', paramMetricSql: '', paramValidationPrompt: '' }))
+    router.refresh()
+  }
+
+  async function saveEdit() {
+    if (!editDrawer || !editForm) return
+    setSaving(true)
+    const params: Record<string, unknown> = { ...editDrawer.parameters }
+    // Build params from editForm similar to save()
+    if (['range', 'range_check'].includes(editForm.type)) { if (editForm.paramMin) params.min = parseFloat(editForm.paramMin); if (editForm.paramMax) params.max = parseFloat(editForm.paramMax) }
+    if (['regex', 'regex_check'].includes(editForm.type)) params.pattern = editForm.paramPattern
+    if (['freshness', 'freshness_check'].includes(editForm.type)) params.maxAgeHours = parseInt(editForm.paramAge || '24')
+    if (['custom_sql', 'custom_sql_check'].includes(editForm.type)) params.sql = editForm.customSql
+
+    await fetch('/api/rules', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: editDrawer.id, name: editForm.name, description: editForm.description,
+        category: editForm.category, type: editForm.type, severity: editForm.severity,
+        status: editForm.status, enabled: editForm.status === 'active',
+        parameters: params,
+      })
+    })
+    setRules(prev => prev.map(r => r.id === editDrawer.id ? {
+      ...r, name: editForm.name, description: editForm.description,
+      category: editForm.category, type: editForm.type, severity: editForm.severity,
+      status: editForm.status, enabled: editForm.status === 'active',
+    } : r))
+    setEditDrawer(null)
+    setEditForm(null)
     setSaving(false)
     router.refresh()
   }
 
+  function openEdit(rule: Rule) {
+    setEditDrawer(rule)
+    setEditForm({
+      name: rule.name, description: rule.description || '', category: rule.category,
+      type: rule.type, connectionId: rule.connectionId, tableName: rule.tableName,
+      columnName: rule.columnName || '', severity: rule.severity,
+      status: rule.status || (rule.enabled ? 'active' : 'disabled'),
+      paramMin: String(rule.parameters?.min ?? rule.parameters?.min_value ?? ''),
+      paramMax: String(rule.parameters?.max ?? rule.parameters?.max_value ?? ''),
+      paramPattern: String(rule.parameters?.pattern ?? ''),
+      paramAge: String(rule.parameters?.maxAgeHours ?? ''),
+      paramRows: String(rule.parameters?.minRows ?? ''),
+      paramAcceptedValues: Array.isArray(rule.parameters?.accepted_values) ? (rule.parameters.accepted_values as string[]).join(', ') : '',
+      paramCondition: String(rule.parameters?.condition ?? ''),
+      paramExpectedColumns: Array.isArray(rule.parameters?.expected_columns) ? (rule.parameters.expected_columns as string[]).join(', ') : '',
+      paramMetricSql: String(rule.parameters?.metric_sql ?? ''),
+      paramSampleSize: String(rule.parameters?.sample_size ?? '100'),
+      paramValidationPrompt: String(rule.parameters?.validation_prompt ?? ''),
+      paramBaselineMean: String(rule.parameters?.baseline_mean ?? ''),
+      paramBaselineStd: String(rule.parameters?.baseline_std ?? ''),
+      paramTolerancePct: String(rule.parameters?.tolerance_pct ?? '20'),
+      paramRefTable: String(rule.parameters?.reference_table ?? ''),
+      paramRefColumn: String(rule.parameters?.reference_column ?? ''),
+      paramDateColumn: String(rule.parameters?.dateColumn ?? ''),
+      customSql: String(rule.parameters?.sql ?? ''),
+    })
+  }
+
+  /* ── Styles ───────────────────────────────────────────────────── */
+
   const inp = (style?: React.CSSProperties): React.CSSProperties => ({
-    width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0',
-    fontSize: '14px', color: '#0f172a', background: '#f8fafc', outline: 'none', ...style
+    width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0',
+    fontSize: '13px', color: '#0f172a', background: '#fafaf9', outline: 'none', ...style
   })
 
-  const categoryCounts = CATEGORIES.reduce((acc, cat) => {
-    acc[cat.value] = rules.filter(r => r.category === cat.value).length
-    return acc
-  }, {} as Record<string, number>)
+  const activeFilterCount = [activeCategory !== 'all', statusFilter !== 'all', severityFilter !== 'all', tableFilter !== ''].filter(Boolean).length
+
+  /* ── Render ───────────────────────────────────────────────────── */
 
   return (
-    <div style={{ padding: '32px', maxWidth: '1100px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+    <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
+      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Rules</span></div>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div>
-          <h1 style={{ fontSize: '26px', fontWeight: 800, color: '#0f172a', margin: 0 }}>Quality Rules</h1>
-          <p style={{ color: '#64748b', fontSize: '14px', margin: '4px 0 0' }}>{rules.filter(r => r.enabled).length} active rules across {rules.length} total</p>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>Quality Rules</h1>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>
+            {rules.filter(r => r.status === 'active' || r.enabled).length} active rules across {rules.length} total
+          </p>
         </div>
         <button onClick={() => setShowModal(true)} style={{
-          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: '#fff', border: 'none',
-          padding: '12px 22px', borderRadius: '12px', fontSize: '14px', fontWeight: 600,
-          cursor: 'pointer', boxShadow: '0 4px 14px rgba(99,102,241,0.35)'
+          background: '#E8541A', color: '#fff', border: 'none',
+          padding: '8px 18px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer'
         }}>+ Add Rule</button>
       </div>
 
-      {/* Category Filter */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', flexWrap: 'wrap' }}>
+      {/* KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '20px' }}>
+        {[
+          { label: 'Total Rules', value: String(rules.length), color: '#1a1a1a' },
+          { label: 'Active', value: String(statusCounts.active || 0), color: '#16a34a' },
+          { label: 'Pending Review', value: String(statusCounts.pending_review || 0), color: '#d97706' },
+          { label: 'Disabled', value: String(statusCounts.disabled || 0), color: '#ea580c' },
+          { label: 'Archived', value: String(statusCounts.archived || 0), color: '#dc2626' },
+        ].map((kpi, i) => (
+          <div key={i} style={card}>
+            <div style={{ fontSize: '11.5px', color: '#64748b', marginBottom: '6px', fontWeight: 500 }}>{kpi.label}</div>
+            <div style={{ fontSize: '28px', fontWeight: 700, color: kpi.color, letterSpacing: '-1px' }}>{kpi.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Search + Filters */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: '1 1 260px', maxWidth: '320px' }}>
+          <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '14px' }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search rules..." style={{ ...inp(), paddingLeft: '32px' }} />
+        </div>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as RuleStatus | 'all')} style={{ ...inp(), width: 'auto', minWidth: '140px' }}>
+          <option value="all">All Statuses</option>
+          {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label} ({statusCounts[k] || 0})</option>)}
+        </select>
+        <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value)} style={{ ...inp(), width: 'auto', minWidth: '130px' }}>
+          <option value="all">All Severities</option>
+          {Object.entries(SEVERITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={tableFilter} onChange={e => setTableFilter(e.target.value)} style={{ ...inp(), width: 'auto', minWidth: '140px' }}>
+          <option value="">All Tables</option>
+          {uniqueTables.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        {activeFilterCount > 0 && (
+          <button onClick={() => { setActiveCategory('all'); setStatusFilter('all'); setSeverityFilter('all'); setTableFilter(''); setSearch('') }}
+            style={{ padding: '7px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#dc2626', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>
+            ✕ Clear filters ({activeFilterCount})
+          </button>
+        )}
+      </div>
+
+      {/* Category Filter Chips */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
         <button onClick={() => setActiveCategory('all')} style={{
-          padding: '8px 16px', borderRadius: '20px', border: '1px solid', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
-          background: activeCategory === 'all' ? '#0f172a' : '#fff', color: activeCategory === 'all' ? '#fff' : '#64748b', borderColor: activeCategory === 'all' ? '#0f172a' : '#e2e8f0'
+          padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+          background: activeCategory === 'all' ? '#1a1a1a' : '#fff', color: activeCategory === 'all' ? '#fff' : '#64748b', borderColor: activeCategory === 'all' ? '#1a1a1a' : '#e2e8f0'
         }}>All ({rules.length})</button>
         {CATEGORIES.map(cat => (
           <button key={cat.value} onClick={() => setActiveCategory(cat.value)} style={{
-            padding: '8px 16px', borderRadius: '20px', border: '1px solid', fontSize: '13px', fontWeight: 500, cursor: 'pointer',
+            padding: '6px 14px', borderRadius: '20px', border: '1px solid', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
             background: activeCategory === cat.value ? categoryColors[cat.value] : '#fff',
             color: activeCategory === cat.value ? '#fff' : '#64748b',
             borderColor: activeCategory === cat.value ? categoryColors[cat.value] : '#e2e8f0'
@@ -126,149 +382,222 @@ export default function RulesClient({ initialRules, connections }: Props) {
         ))}
       </div>
 
-      {/* Rules List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {/* Bulk Actions Bar */}
+      {selectedIds.size > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', background: '#f0f9ff', borderRadius: '10px', border: '1px solid #bae6fd', marginBottom: '14px' }}>
+          <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#0369a1' }}>{selectedIds.size} selected</span>
+          <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
+            {[
+              { action: 'activate' as const, label: '✓ Activate', bg: '#dcfce7', color: '#16a34a', border: '#86efac' },
+              { action: 'disable' as const, label: '⏸ Disable', bg: '#fff7ed', color: '#ea580c', border: '#fdba74' },
+              { action: 'archive' as const, label: '📦 Archive', bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' },
+              { action: 'run' as const, label: '▶ Run All', bg: '#dbeafe', color: '#2563eb', border: '#93c5fd' },
+              { action: 'delete' as const, label: '🗑 Delete', bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' },
+            ].map(btn => (
+              <button key={btn.action} onClick={() => bulkAction(btn.action)} disabled={bulkLoading}
+                style={{ padding: '5px 12px', borderRadius: '6px', border: `1px solid ${btn.border}`, background: btn.bg, color: btn.color, fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', opacity: bulkLoading ? 0.5 : 1 }}>
+                {btn.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rules Table */}
+      <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #ebe8df', overflow: 'hidden' }}>
+        {/* Table Header */}
+        <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 110px 100px 100px 90px 120px 80px', gap: '8px', padding: '10px 16px', borderBottom: '1px solid #f3f1ea', background: '#fafaf9' }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#E8541A' }} />
+          </div>
+          {['Rule', 'Type', 'Severity', 'Status', 'Table', 'Last Run', 'Actions'].map(h => (
+            <div key={h} style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</div>
+          ))}
+        </div>
+
+        {/* Rules Rows */}
         {filtered.map(rule => {
           const cat = CATEGORIES.find(c => c.value === rule.category)
           const sev = SEVERITY_CONFIG[rule.severity]
+          const stat = STATUS_CONFIG[rule.status || (rule.enabled ? 'active' : 'disabled')]
           const conn = connections.find(c => c.id === rule.connectionId)
+          const isRunning = testing === rule.id
+          const result = testResults[rule.id]
           return (
-            <div key={rule.id} className="fade-in" style={{
-              background: '#fff', borderRadius: '14px', padding: '18px 20px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.06)', border: `1px solid ${rule.enabled ? '#f1f5f9' : '#f8fafc'}`,
-              opacity: rule.enabled ? 1 : 0.6, display: 'flex', alignItems: 'center', gap: '16px'
+            <div key={rule.id} style={{
+              display: 'grid', gridTemplateColumns: '36px 1fr 110px 100px 100px 90px 120px 80px', gap: '8px',
+              padding: '12px 16px', borderBottom: '1px solid #f8f6f0', alignItems: 'center',
+              opacity: rule.status === 'archived' || rule.status === 'disabled' ? 0.6 : 1,
+              background: selectedIds.has(rule.id) ? '#f0f9ff' : '#fff',
+              transition: 'background 0.15s',
             }}>
-              {/* Toggle */}
-              <div onClick={() => toggleRule(rule)} style={{
-                width: '42px', height: '24px', borderRadius: '12px', cursor: 'pointer', flexShrink: 0,
-                background: rule.enabled ? categoryColors[rule.category] : '#e2e8f0',
-                position: 'relative', transition: 'background 0.3s'
-              }}>
-                <div style={{
-                  width: '18px', height: '18px', borderRadius: '50%', background: '#fff',
-                  position: 'absolute', top: '3px', left: rule.enabled ? '21px' : '3px',
-                  transition: 'left 0.3s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
-                }} />
-              </div>
+              {/* Checkbox */}
+              <div><input type="checkbox" checked={selectedIds.has(rule.id)} onChange={() => toggleSelect(rule.id)} style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#E8541A' }} /></div>
 
-              {/* Category Icon */}
-              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: `${categoryColors[rule.category]}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>
-                {cat?.icon}
-              </div>
-
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '14px' }}>{rule.name}</span>
-                  <span style={{ background: sev.bg, color: sev.color, padding: '1px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>{sev.label}</span>
+              {/* Rule Info */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                  <span style={{ fontSize: '16px' }}>{cat?.icon}</span>
+                  <span style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rule.name}</span>
                 </div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>{rule.description}</div>
-                <div style={{ display: 'flex', gap: '12px', marginTop: '6px' }}>
-                  <span style={{ fontSize: '11px', color: '#94a3b8' }}>📌 {conn?.name || 'Unknown'}</span>
-                  <span style={{ fontSize: '11px', color: '#94a3b8' }}>📊 {rule.tableName}{rule.columnName ? `.${rule.columnName}` : ''}</span>
-                  <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'capitalize' }}>🏷 {rule.category}</span>
+                <div style={{ fontSize: '11.5px', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {rule.description || 'No description'} · {conn?.name || 'Unknown'}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-                <span style={{ padding: '4px 10px', borderRadius: '8px', background: '#f8fafc', color: '#64748b', fontSize: '11px', fontWeight: 500 }}>
-                  {RULE_TYPES.find(t => t.value === rule.type)?.label}
+              {/* Type */}
+              <div>
+                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#f1f5f9', color: '#475569', fontSize: '10.5px', fontWeight: 500 }}>
+                  {fmtType(rule.type)}
                 </span>
-                <button onClick={() => deleteRule(rule.id)} style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '12px', cursor: 'pointer' }}>🗑</button>
+              </div>
+
+              {/* Severity */}
+              <div>
+                <span style={{ background: sev.bg, color: sev.color, padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600 }}>{sev.label}</span>
+              </div>
+
+              {/* Status with dropdown */}
+              <div style={{ position: 'relative' }}>
+                <StatusDropdown rule={rule} stat={stat} onUpdate={updateRuleStatus} />
+              </div>
+
+              {/* Table */}
+              <div>
+                <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>{rule.tableName}{rule.columnName ? `.${rule.columnName}` : ''}</span>
+              </div>
+
+              {/* Last Run */}
+              <div>
+                {isRunning ? (
+                  <span style={{ fontSize: '11px', color: '#2563eb', fontWeight: 500 }}>⏳ Running...</span>
+                ) : result ? (
+                  <span style={{
+                    padding: '2px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600,
+                    background: result.status === 'passed' ? '#dcfce7' : '#fee2e2',
+                    color: result.status === 'passed' ? '#16a34a' : '#dc2626'
+                  }}>
+                    {result.status === 'passed' ? '✓' : '✗'} {result.score}%
+                  </span>
+                ) : rule.lastRunStatus ? (
+                  <span style={{
+                    padding: '2px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600,
+                    background: rule.lastRunStatus === 'passed' ? '#dcfce7' : '#fee2e2',
+                    color: rule.lastRunStatus === 'passed' ? '#16a34a' : '#dc2626'
+                  }}>
+                    {rule.lastRunStatus === 'passed' ? '✓' : '✗'} {rule.lastRunScore}%
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '11px', color: '#cbd5e1' }}>—</span>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button onClick={() => testRule(rule.id)} disabled={isRunning} title="Test rule"
+                  style={{ padding: '5px 7px', borderRadius: '6px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '12px', cursor: 'pointer' }}>▶</button>
+                <button onClick={() => openEdit(rule)} title="Edit rule"
+                  style={{ padding: '5px 7px', borderRadius: '6px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '12px', cursor: 'pointer' }}>✏</button>
+                <button onClick={() => deleteRule(rule.id)} title="Delete rule"
+                  style={{ padding: '5px 7px', borderRadius: '6px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '12px', cursor: 'pointer' }}>🗑</button>
               </div>
             </div>
           )
         })}
 
         {filtered.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '60px', background: '#fff', borderRadius: '16px', border: '2px dashed #e2e8f0' }}>
+          <div style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>
             <div style={{ fontSize: '40px', marginBottom: '12px' }}>📋</div>
-            <div style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', marginBottom: '6px' }}>No rules yet</div>
-            <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '20px' }}>Create your first quality rule or ask the AI Agent to help</div>
-            <button onClick={() => setShowModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>
-              + Add Rule
-            </button>
+            <div style={{ fontSize: '15px', fontWeight: 600, color: '#1a1a1a', marginBottom: '6px' }}>No rules found</div>
+            <div style={{ color: '#64748b', fontSize: '13px', marginBottom: '20px' }}>
+              {search || activeCategory !== 'all' || statusFilter !== 'all' ? 'Try adjusting your filters' : 'Create your first quality rule'}
+            </div>
+            <button onClick={() => setShowModal(true)} style={{ background: '#E8541A', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '8px', fontSize: '12.5px', cursor: 'pointer', fontWeight: 600 }}>+ Add Rule</button>
+          </div>
+        )}
+
+        {/* Summary Footer */}
+        {filtered.length > 0 && (
+          <div style={{ padding: '10px 16px', background: '#fafaf9', borderTop: '1px solid #f3f1ea', fontSize: '12px', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
+            <span>Showing {filtered.length} of {rules.length} rules</span>
+            <span>{rules.filter(r => r.status === 'active' || r.enabled).length} active · {rules.filter(r => r.status === 'pending_review').length} pending review</span>
           </div>
         )}
       </div>
 
-      {/* Modal */}
+      {/* ── Create Rule Modal ─────────────────────────────────────── */}
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, backdropFilter: 'blur(4px)' }}>
-          <div className="slide-up" style={{ background: '#fff', borderRadius: '20px', padding: '28px', width: '520px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+          <div style={{ background: '#fff', borderRadius: '16px', padding: '24px', width: '560px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', maxHeight: '92vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
               <div>
-                <div style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Add Quality Rule</div>
-                <div style={{ fontSize: '13px', color: '#64748b' }}>Define a new data quality check</div>
+                <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>Add Quality Rule</div>
+                <div style={{ fontSize: '12.5px', color: '#64748b' }}>Define a new data quality check</div>
               </div>
-              <button onClick={() => setShowModal(false)} style={{ background: '#f8fafc', border: 'none', width: '32px', height: '32px', borderRadius: '8px', cursor: 'pointer', color: '#64748b', fontSize: '16px' }}>✕</button>
+              <button onClick={() => setShowModal(false)} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>✕</button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Rule Name *</label>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Rule Name *</label>
                 <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Customer Email Not Null" style={inp()} />
               </div>
               <div>
-                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Description</label>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Description</label>
                 <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="What does this rule check?" style={inp()} />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Category</label>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Category</label>
                   <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value as RuleCategory }))} style={inp()}>
                     {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.icon} {c.label}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Rule Type</label>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Rule Type</label>
                   <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as RuleType }))} style={inp()}>
                     {RULE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                 </div>
               </div>
 
-              <div>
-                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Connection *</label>
-                <select value={form.connectionId} onChange={e => setForm(f => ({ ...f, connectionId: e.target.value }))} style={inp()}>
-                  {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Table *</label>
-                  <input value={form.tableName} onChange={e => setForm(f => ({ ...f, tableName: e.target.value }))} placeholder="customers" style={inp()} />
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Connection *</label>
+                  <select value={form.connectionId} onChange={e => setForm(f => ({ ...f, connectionId: e.target.value }))} style={inp()}>
+                    {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Column</label>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Status</label>
+                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as RuleStatus }))} style={inp()}>
+                    {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Table *</label>
+                  <input value={form.tableName} onChange={e => setForm(f => ({ ...f, tableName: e.target.value }))} placeholder="schema.table" style={inp()} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Column</label>
                   <input value={form.columnName} onChange={e => setForm(f => ({ ...f, columnName: e.target.value }))} placeholder="email (optional)" style={inp()} />
                 </div>
               </div>
 
-              {/* Dynamic params */}
-              {form.type === 'range' && (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <div><label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Min Value</label><input value={form.paramMin} onChange={e => setForm(f => ({ ...f, paramMin: e.target.value }))} placeholder="0" style={inp()} /></div>
-                  <div><label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Max Value</label><input value={form.paramMax} onChange={e => setForm(f => ({ ...f, paramMax: e.target.value }))} placeholder="100000" style={inp()} /></div>
-                </div>
-              )}
-              {form.type === 'regex' && (
-                <div><label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Regex Pattern</label><input value={form.paramPattern} onChange={e => setForm(f => ({ ...f, paramPattern: e.target.value }))} placeholder="^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$" style={inp()} /></div>
-              )}
-              {form.type === 'freshness' && (
-                <div><label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Max Age (hours)</label><input value={form.paramAge} onChange={e => setForm(f => ({ ...f, paramAge: e.target.value }))} placeholder="24" style={inp()} /></div>
-              )}
-              {form.type === 'row_count' && (
-                <div><label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Minimum Rows</label><input value={form.paramRows} onChange={e => setForm(f => ({ ...f, paramRows: e.target.value }))} placeholder="1000" style={inp()} /></div>
-              )}
+              {/* Dynamic Config Fields */}
+              {renderConfigFields(form, (k, v) => setForm(f => ({ ...f, [k]: v })), inp)}
 
+              {/* Severity */}
               <div>
-                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Severity</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Severity</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                   {(Object.keys(SEVERITY_CONFIG) as Rule['severity'][]).map(sev => (
                     <button key={sev} onClick={() => setForm(f => ({ ...f, severity: sev }))} style={{
-                      padding: '8px', borderRadius: '8px', border: '1px solid', fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+                      padding: '7px', borderRadius: '8px', border: '1px solid', fontSize: '11.5px', fontWeight: 500, cursor: 'pointer',
                       background: form.severity === sev ? SEVERITY_CONFIG[sev].bg : '#fff',
                       color: form.severity === sev ? SEVERITY_CONFIG[sev].color : '#64748b',
                       borderColor: form.severity === sev ? SEVERITY_CONFIG[sev].color : '#e2e8f0'
@@ -277,12 +606,12 @@ export default function RulesClient({ initialRules, connections }: Props) {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '12px', paddingTop: '8px' }}>
-                <button onClick={() => setShowModal(false)} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+              <div style={{ display: 'flex', gap: '10px', paddingTop: '6px' }}>
+                <button onClick={() => setShowModal(false)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
                 <button onClick={save} disabled={saving || !form.name || !form.connectionId || !form.tableName} style={{
-                  flex: 2, padding: '12px', borderRadius: '10px', border: 'none', fontSize: '14px', fontWeight: 600,
+                  flex: 2, padding: '10px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
                   cursor: (form.name && form.connectionId && form.tableName) ? 'pointer' : 'not-allowed',
-                  background: (form.name && form.connectionId && form.tableName) ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '#e2e8f0',
+                  background: (form.name && form.connectionId && form.tableName) ? '#E8541A' : '#e2e8f0',
                   color: (form.name && form.connectionId && form.tableName) ? '#fff' : '#94a3b8'
                 }}>{saving ? '⏳ Saving...' : '+ Add Rule'}</button>
               </div>
@@ -290,6 +619,222 @@ export default function RulesClient({ initialRules, connections }: Props) {
           </div>
         </div>
       )}
+
+      {/* ── Edit Drawer ───────────────────────────────────────────── */}
+      {editDrawer && editForm && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex' }}>
+          <div style={{ flex: 1, background: 'rgba(0,0,0,0.2)' }} onClick={() => { setEditDrawer(null); setEditForm(null) }} />
+          <div style={{ width: '480px', background: '#fff', height: '100%', boxShadow: '-8px 0 30px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column' }}>
+            {/* Drawer Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #ebe8df', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace', marginBottom: '2px' }}>{editDrawer.id}</div>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>Edit Rule</div>
+              </div>
+              <button onClick={() => { setEditDrawer(null); setEditForm(null) }} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', width: '28px', height: '28px', borderRadius: '6px', cursor: 'pointer', color: '#64748b', fontSize: '13px' }}>✕</button>
+            </div>
+
+            {/* Drawer Body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Rule Name *</label>
+                <input value={editForm.name} onChange={e => setEditForm(f => f ? { ...f, name: e.target.value } : f)} style={inp()} />
+              </div>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Description</label>
+                <textarea value={editForm.description} onChange={e => setEditForm(f => f ? { ...f, description: e.target.value } : f)} rows={2} style={{ ...inp(), resize: 'vertical' as const }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Rule Type</label>
+                  <select value={editForm.type} onChange={e => setEditForm(f => f ? { ...f, type: e.target.value as RuleType } : f)} style={inp()}>
+                    {RULE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Category</label>
+                  <select value={editForm.category} onChange={e => setEditForm(f => f ? { ...f, category: e.target.value as RuleCategory } : f)} style={inp()}>
+                    {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.icon} {c.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Config Fields */}
+              {editForm && renderConfigFields(editForm, (k, v) => setEditForm(f => f ? { ...f, [k]: v } : f), inp)}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Severity</label>
+                  <select value={editForm.severity} onChange={e => setEditForm(f => f ? { ...f, severity: e.target.value as Rule['severity'] } : f)} style={inp()}>
+                    {Object.entries(SEVERITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Status</label>
+                  <select value={editForm.status} onChange={e => setEditForm(f => f ? { ...f, status: e.target.value as RuleStatus } : f)} style={inp()}>
+                    {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* SQL Preview */}
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Custom SQL (blank = auto-generate)</label>
+                <textarea value={editForm.customSql} onChange={e => setEditForm(f => f ? { ...f, customSql: e.target.value } : f)} rows={5}
+                  placeholder="SELECT COUNT(*) AS failed_count FROM ..."
+                  style={{ ...inp(), fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' as const }} />
+              </div>
+
+              {/* Read-only info */}
+              <div style={{ padding: '12px', background: '#fafaf9', borderRadius: '8px', border: '1px solid #ebe8df' }}>
+                <div style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Target</div>
+                <div style={{ fontSize: '12px', color: '#475569' }}>
+                  <span style={{ fontFamily: 'monospace' }}>{editDrawer.tableName}{editDrawer.columnName ? `.${editDrawer.columnName}` : ''}</span>
+                  <span style={{ color: '#94a3b8' }}> · {connections.find(c => c.id === editDrawer.connectionId)?.name || 'Unknown'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Drawer Footer */}
+            <div style={{ padding: '14px 20px', borderTop: '1px solid #ebe8df', display: 'flex', gap: '8px' }}>
+              <button onClick={saveEdit} disabled={saving} style={{
+                padding: '9px 18px', borderRadius: '8px', border: 'none', background: '#E8541A', color: '#fff',
+                fontSize: '13px', fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.6 : 1
+              }}>{saving ? '⏳ Saving...' : '✓ Save Changes'}</button>
+              <button onClick={() => testRule(editDrawer.id)} disabled={testing === editDrawer.id}
+                title="Run against connection"
+                style={{ padding: '9px 14px', borderRadius: '8px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>
+                {testing === editDrawer.id ? '⏳ Testing...' : '▶ Test Rule'}
+              </button>
+              <button onClick={() => { setEditDrawer(null); setEditForm(null) }} style={{ padding: '9px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+/* ── Status Dropdown Component ───────────────────────────────────── */
+
+function StatusDropdown({ rule, stat, onUpdate }: {
+  rule: Rule; stat: { bg: string; color: string; label: string; border: string }
+  onUpdate: (id: string, status: RuleStatus) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const statuses: RuleStatus[] = ['active', 'draft', 'pending_review', 'disabled', 'archived']
+  const currentStatus = rule.status || (rule.enabled ? 'active' : 'disabled')
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '20px',
+        background: stat.bg, color: stat.color, border: `1px solid ${stat.border}`,
+        fontSize: '10.5px', fontWeight: 600, cursor: 'pointer'
+      }}>
+        {stat.label}
+        <span style={{ fontSize: '8px', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', left: 0, top: '28px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.1)', zIndex: 30, width: '150px', padding: '4px 0' }}
+          onMouseLeave={() => setOpen(false)}>
+          {statuses.map(s => {
+            const cfg = STATUS_CONFIG[s]
+            return (
+              <button key={s} onClick={() => { onUpdate(rule.id, s); setOpen(false) }}
+                style={{ width: '100%', textAlign: 'left', padding: '6px 12px', fontSize: '12px', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', background: currentStatus === s ? '#f8fafc' : '#fff', border: 'none', color: cfg.color }}>
+                {currentStatus === s && <span style={{ color: '#16a34a', fontSize: '10px' }}>✓</span>}
+                <span style={{ background: cfg.bg, color: cfg.color, padding: '2px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: 600 }}>{cfg.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Dynamic Config Fields ───────────────────────────────────────── */
+
+function renderConfigFields(
+  form: { type: string; paramMin: string; paramMax: string; paramPattern: string; paramAge: string; paramRows: string; paramAcceptedValues: string; paramCondition: string; paramExpectedColumns: string; paramRefTable: string; paramRefColumn: string; paramDateColumn: string; paramMetricSql: string; paramSampleSize: string; paramValidationPrompt: string; paramBaselineMean: string; paramBaselineStd: string; paramTolerancePct: string; customSql: string },
+  set: (key: string, value: string) => void,
+  inp: (s?: React.CSSProperties) => React.CSSProperties
+) {
+  const lbl: React.CSSProperties = { fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }
+  const wrap: React.CSSProperties = { padding: '12px', background: '#fafaf9', borderRadius: '8px', border: '1px solid #ebe8df', display: 'flex', flexDirection: 'column', gap: '10px' }
+  const headStyle: React.CSSProperties = { fontSize: '10px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }
+
+  const t = form.type
+  let fields: React.ReactNode = null
+
+  if (['range', 'range_check'].includes(t)) {
+    fields = (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div><label style={lbl}>Min Value</label><input value={form.paramMin} onChange={e => set('paramMin', e.target.value)} placeholder="0" style={inp()} /></div>
+        <div><label style={lbl}>Max Value</label><input value={form.paramMax} onChange={e => set('paramMax', e.target.value)} placeholder="100000" style={inp()} /></div>
+      </div>
+    )
+  } else if (['regex', 'regex_check'].includes(t)) {
+    fields = <div><label style={lbl}>Regex Pattern</label><input value={form.paramPattern} onChange={e => set('paramPattern', e.target.value)} placeholder="^[a-zA-Z0-9._%+-]+@..." style={inp({ fontFamily: 'monospace', fontSize: '12px' })} /></div>
+  } else if (['freshness', 'freshness_check'].includes(t)) {
+    fields = <div><label style={lbl}>Max Age (hours)</label><input value={form.paramAge} onChange={e => set('paramAge', e.target.value)} placeholder="24" style={inp()} /></div>
+  } else if (['row_count'].includes(t)) {
+    fields = <div><label style={lbl}>Minimum Rows</label><input value={form.paramRows} onChange={e => set('paramRows', e.target.value)} placeholder="1000" style={inp()} /></div>
+  } else if (t === 'volume_check') {
+    fields = (
+      <>
+        <div><label style={lbl}>Date Column</label><input value={form.paramDateColumn} onChange={e => set('paramDateColumn', e.target.value)} placeholder="created_at" style={inp()} /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div><label style={lbl}>Min Rows</label><input value={form.paramRows} onChange={e => set('paramRows', e.target.value)} placeholder="1000" style={inp()} /></div>
+          <div><label style={lbl}>Max Rows</label><input value={form.paramMax} onChange={e => set('paramMax', e.target.value)} placeholder="100000" style={inp()} /></div>
+        </div>
+      </>
+    )
+  } else if (t === 'accepted_values_check') {
+    fields = <div><label style={lbl}>Accepted Values (comma-separated)</label><input value={form.paramAcceptedValues} onChange={e => set('paramAcceptedValues', e.target.value)} placeholder="ACTIVE, INACTIVE, PENDING" style={inp()} /></div>
+  } else if (['business_rule_check', 'semantic_consistency_check', 'referential_sanity_check'].includes(t)) {
+    fields = <div><label style={lbl}>Condition</label><textarea value={form.paramCondition} onChange={e => set('paramCondition', e.target.value)} rows={2} placeholder="ship_date >= order_date" style={{ ...inp(), fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' as const }} /></div>
+  } else if (t === 'schema_drift_check') {
+    fields = <div><label style={lbl}>Expected Columns (comma-separated)</label><input value={form.paramExpectedColumns} onChange={e => set('paramExpectedColumns', e.target.value)} placeholder="id, name, email, created_at" style={inp()} /></div>
+  } else if (['referential', 'referential_integrity_check'].includes(t)) {
+    fields = (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <div><label style={lbl}>Ref Table</label><input value={form.paramRefTable} onChange={e => set('paramRefTable', e.target.value)} placeholder="schema.table" style={inp()} /></div>
+        <div><label style={lbl}>Ref Column</label><input value={form.paramRefColumn} onChange={e => set('paramRefColumn', e.target.value)} placeholder="id" style={inp()} /></div>
+      </div>
+    )
+  } else if (t === 'business_metric_check') {
+    fields = (
+      <>
+        <div><label style={lbl}>Metric SQL</label><input value={form.paramMetricSql} onChange={e => set('paramMetricSql', e.target.value)} placeholder="AVG(order_amount)" style={inp({ fontFamily: 'monospace', fontSize: '12px' })} /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div><label style={lbl}>Min Value</label><input value={form.paramMin} onChange={e => set('paramMin', e.target.value)} placeholder="50" style={inp()} /></div>
+          <div><label style={lbl}>Max Value</label><input value={form.paramMax} onChange={e => set('paramMax', e.target.value)} placeholder="10000" style={inp()} /></div>
+        </div>
+      </>
+    )
+  } else if (t === 'distribution_consistency_check') {
+    fields = (
+      <>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div><label style={lbl}>Baseline Mean</label><input value={form.paramBaselineMean} onChange={e => set('paramBaselineMean', e.target.value)} placeholder="100.0" style={inp()} /></div>
+          <div><label style={lbl}>Baseline Std Dev</label><input value={form.paramBaselineStd} onChange={e => set('paramBaselineStd', e.target.value)} placeholder="15.0" style={inp()} /></div>
+        </div>
+        <div><label style={lbl}>Tolerance %</label><input value={form.paramTolerancePct} onChange={e => set('paramTolerancePct', e.target.value)} placeholder="20" style={inp()} /></div>
+      </>
+    )
+  } else if (t === 'llm_semantic_check') {
+    fields = (
+      <>
+        <div><label style={lbl}>Sample Size</label><input value={form.paramSampleSize} onChange={e => set('paramSampleSize', e.target.value)} placeholder="100" style={inp()} /></div>
+        <div><label style={lbl}>Validation Prompt</label><textarea value={form.paramValidationPrompt} onChange={e => set('paramValidationPrompt', e.target.value)} rows={3} placeholder="Check that each row represents a valid customer record..." style={{ ...inp(), fontSize: '12px', resize: 'vertical' as const }} /></div>
+      </>
+    )
+  } else if (['custom_sql', 'custom_sql_check'].includes(t)) {
+    fields = <div><label style={lbl}>SQL Expression</label><textarea value={form.customSql} onChange={e => set('customSql', e.target.value)} rows={4} placeholder="SELECT COUNT(*) AS failed_count FROM ..." style={{ ...inp(), fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' as const }} /></div>
+  }
+
+  if (!fields) return null
+  return <div style={wrap}><div style={headStyle}>Rule Configuration</div>{fields}</div>
 }

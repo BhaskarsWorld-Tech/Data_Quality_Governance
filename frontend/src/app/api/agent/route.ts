@@ -144,6 +144,7 @@ async function executeTool(toolName: string, input: Record<string, unknown>): Pr
         columnName: input.columnName as string | undefined,
         parameters: (input.parameters as Record<string, unknown>) || {},
         enabled: true,
+        status: 'active' as const,
         severity: input.severity as Rule['severity'],
         createdAt: new Date().toISOString()
       }

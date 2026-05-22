@@ -9,6 +9,127 @@ const I = ({ d, size = 18 }: { d: string; size?: number }) => (
     strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
 )
 
+/* ─── Connection type icons ─── */
+const connIcons: Record<string, string> = {
+  snowflake: '❄️', postgresql: '🐘', mysql: '🐬', bigquery: '📊',
+  redshift: '🔴', mongodb: '🍃', csv: '📄', api: '🔌',
+}
+
+/* ─── Top-bar Connection Selector ─── */
+function TopBarConnectionSelector() {
+  const [connections, setConnections] = useState<{ id: string; name: string; type: string; status: string; database?: string; host?: string }[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    fetch('/api/connections').then(r => r.json()).then(data => {
+      const conns = Array.isArray(data) ? data : (data.connections ?? [])
+      setConnections(conns)
+      const active = conns.find((c: { status: string }) => c.status === 'active')
+      if (active) setActiveId(active.id)
+      else if (conns.length > 0) setActiveId(conns[0].id)
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (open && ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  const active = connections.find(c => c.id === activeId)
+
+  async function handleRefresh() {
+    if (!active) return
+    setRefreshing(true)
+    try {
+      await fetch('/api/connections/test', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(active),
+      })
+      const r = await fetch('/api/connections')
+      const data = await r.json()
+      setConnections(Array.isArray(data) ? data : (data.connections ?? []))
+    } catch {}
+    setRefreshing(false)
+  }
+
+  if (connections.length === 0) {
+    return (
+      <Link href="/settings" style={{
+        display: 'inline-flex', alignItems: 'center', gap: '5px',
+        background: '#fff', border: '1px solid #ebe8df', padding: '5px 12px',
+        borderRadius: '7px', fontSize: '12px', color: '#E8541A', fontWeight: 600,
+        textDecoration: 'none',
+      }}>+ Connect</Link>
+    )
+  }
+
+  return (
+    <div ref={ref} style={{ display: 'flex', alignItems: 'center', gap: '5px', position: 'relative' }}>
+      <div onClick={() => setOpen(!open)} style={{
+        display: 'flex', alignItems: 'center', gap: '7px',
+        background: '#fff', border: '1px solid #ebe8df', padding: '5px 12px',
+        borderRadius: '7px', cursor: 'pointer', minWidth: '150px',
+        boxShadow: open ? '0 0 0 2px #dbeafe' : 'none',
+      }}>
+        <span style={{ fontSize: '14px' }}>{active ? (connIcons[active.type] ?? '🔗') : '🔗'}</span>
+        <span style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {active?.name ?? 'Select'}
+        </span>
+        <span style={{
+          width: '7px', height: '7px', borderRadius: '50%',
+          background: active?.status === 'active' ? '#16a34a' : active?.status === 'error' ? '#dc2626' : '#d97706',
+          flexShrink: 0,
+        }} />
+        <span style={{ fontSize: '9px', color: '#94a3b8', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+      </div>
+      <button onClick={handleRefresh} disabled={refreshing} style={{
+        background: '#fff', border: '1px solid #ebe8df', width: '30px', height: '30px',
+        borderRadius: '7px', cursor: refreshing ? 'not-allowed' : 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '13px', opacity: refreshing ? 0.5 : 1,
+      }} title="Refresh connection">
+        {refreshing ? '⏳' : '🔄'}
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, background: '#fff',
+          border: '1px solid #ebe8df', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          zIndex: 100, minWidth: '240px', overflow: 'hidden',
+        }}>
+          {connections.map(conn => (
+            <button key={conn.id} onClick={() => { setActiveId(conn.id); setOpen(false) }} style={{
+              display: 'flex', width: '100%', padding: '9px 14px', textAlign: 'left',
+              background: conn.id === activeId ? '#eff6ff' : '#fff', border: 'none',
+              alignItems: 'center', gap: '10px', cursor: 'pointer',
+              borderBottom: '1px solid #f3f1ea',
+            }}>
+              <span style={{ fontSize: '15px' }}>{connIcons[conn.type] ?? '🔗'}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '12.5px', fontWeight: conn.id === activeId ? 600 : 400, color: conn.id === activeId ? '#2563eb' : '#374151' }}>
+                  {conn.id === activeId && '✓ '}{conn.name}
+                </div>
+                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>{conn.type} · {conn.database ?? conn.host ?? ''}</div>
+              </div>
+              <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: conn.status === 'active' ? '#16a34a' : conn.status === 'error' ? '#dc2626' : '#d97706' }} />
+            </button>
+          ))}
+          <Link href="/settings" style={{
+            display: 'block', padding: '9px 14px', textAlign: 'center',
+            fontSize: '12px', color: '#E8541A', fontWeight: 600,
+            textDecoration: 'none', borderTop: '1px solid #ebe8df',
+          }}>⚙ Manage Connections</Link>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ─── Section definitions ─── */
 type SubItem = { href: string; label: string; iconD: string; badge?: string }
 type Section = {
@@ -59,7 +180,6 @@ const sections: Section[] = [
     railIconD: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
     items: [
       { href: '/data-browser',   label: 'Data Browser',    iconD: 'M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z' },
-      { href: '/connections',    label: 'Connections',     iconD: 'M9 17H7A5 5 0 117 7h2m6 0h2a5 5 0 010 10h-2M8 12h8' },
       { href: '/reports',        label: 'Reports',         iconD: 'M9 19V6a1 1 0 011-1h4a1 1 0 011 1v13M5 19V11a1 1 0 011-1h3v9M19 19v-5a1 1 0 00-1-1h-3v6M3 19h18' },
       { href: '/data-products',  label: 'Data Products',   iconD: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
       { href: '/executive',      label: 'Executive View',  iconD: 'M3 12l2-2 4 4 8-8 4 4M3 21h18' },
@@ -80,18 +200,11 @@ const sections: Section[] = [
     ]
   },
   {
-    key: 'integration', label: 'Integrations',
-    railIconD: 'M4 6h4v4H4zM16 6h4v4h-4zM10 14h4v4h-4zM6 10v4M18 10v4M8 8h8M12 14v-2',
-    items: [
-      { href: '/connections',    label: 'Connections',     iconD: 'M9 17H7A5 5 0 117 7h2m6 0h2a5 5 0 010 10h-2M8 12h8' },
-    ]
-  },
-  {
     key: 'settings', label: 'Settings',
     railIconD: 'M10.3 3.5l-.4 1.7a7.5 7.5 0 00-1.6.7L6.6 5l-1.6 1.6 1 1.7c-.3.5-.5 1-.7 1.6l-1.7.4v2.3l1.7.4c.2.6.4 1.1.7 1.6l-1 1.7L6.6 19l1.7-.9c.5.3 1 .5 1.6.7l.4 1.7h2.3l.4-1.7c.6-.2 1.1-.4 1.6-.7l1.7.9 1.6-1.6-.9-1.7c.3-.5.5-1 .7-1.6l1.7-.4v-2.3l-1.7-.4c-.2-.6-.4-1.1-.7-1.6l.9-1.7-1.6-1.6-1.7.9c-.5-.3-1-.5-1.6-.7l-.4-1.7h-2.3zm1.2 5.5a3 3 0 110 6 3 3 0 010-6z',
     items: [
-      { href: '/settings',     label: 'Settings',      iconD: 'M10.3 3.5l-.4 1.7a7.5 7.5 0 00-1.6.7L6.6 5l-1.6 1.6 1 1.7c-.3.5-.5 1-.7 1.6l-1.7.4v2.3l1.7.4c.2.6.4 1.1.7 1.6l-1 1.7L6.6 19l1.7-.9c.5.3 1 .5 1.6.7l.4 1.7h2.3l.4-1.7c.6-.2 1.1-.4 1.6-.7l1.7.9 1.6-1.6-.9-1.7c.3-.5.5-1 .7-1.6l1.7-.4v-2.3l-1.7-.4c-.2-.6-.4-1.1-.7-1.6l.9-1.7-1.6-1.6-1.7.9c-.5-.3-1-.5-1.6-.7l-.4-1.7h-2.3zm1.2 5.5a3 3 0 110 6 3 3 0 010-6z' },
-      { href: '/architecture',  label: 'User Guide',    iconD: 'M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2zM22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z' },
+      { href: '/settings',      label: 'Settings',       iconD: 'M10.3 3.5l-.4 1.7a7.5 7.5 0 00-1.6.7L6.6 5l-1.6 1.6 1 1.7c-.3.5-.5 1-.7 1.6l-1.7.4v2.3l1.7.4c.2.6.4 1.1.7 1.6l-1 1.7L6.6 19l1.7-.9c.5.3 1 .5 1.6.7l.4 1.7h2.3l.4-1.7c.6-.2 1.1-.4 1.6-.7l1.7.9 1.6-1.6-.9-1.7c.3-.5.5-1 .7-1.6l1.7-.4v-2.3l-1.7-.4c-.2-.6-.4-1.1-.7-1.6l.9-1.7-1.6-1.6-1.7.9c-.5-.3-1-.5-1.6-.7l-.4-1.7h-2.3zm1.2 5.5a3 3 0 110 6 3 3 0 010-6z' },
+      { href: '/architecture',   label: 'User Guide',    iconD: 'M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2zM22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z' },
     ]
   },
 ]
@@ -182,10 +295,13 @@ export default function Sidebar() {
         </div>
 
         {/* Brand name */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 0, flex: 1 }}>
           <span style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', letterSpacing: '-0.5px' }}>Data</span>
           <span style={{ fontSize: 20, fontWeight: 700, color: '#E8541A', letterSpacing: '-0.5px' }}>Guard</span>
         </div>
+
+        {/* Connection selector — right side */}
+        <TopBarConnectionSelector />
       </header>
 
       {/* ── Icon Rail (always visible) ── */}

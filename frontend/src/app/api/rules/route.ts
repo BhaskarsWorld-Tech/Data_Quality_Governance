@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     ...body,
     id: generateId('rule'),
     enabled: body.enabled ?? true,
+    status: body.status ?? 'active',
     createdAt: new Date().toISOString()
   }
   store.rules.create(rule)

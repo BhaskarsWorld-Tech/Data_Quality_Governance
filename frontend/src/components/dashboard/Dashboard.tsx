@@ -323,11 +323,6 @@ export default function Dashboard({ stats }: { stats: DashboardStats }) {
         Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
       </div>
 
-      {/* Connection Selector Row */}
-      <div style={{ marginBottom: '16px' }}>
-        <ConnectionSelector />
-      </div>
-
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0, letterSpacing: '-0.4px' }}>Data quality overview</h1>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>

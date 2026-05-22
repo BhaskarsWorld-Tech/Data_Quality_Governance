@@ -30,7 +30,15 @@ export interface Connection {
 }
 
 export type RuleCategory = 'completeness' | 'accuracy' | 'uniqueness' | 'validity' | 'timeliness' | 'consistency'
-export type RuleType = 'not_null' | 'unique' | 'range' | 'regex' | 'custom_sql' | 'freshness' | 'row_count' | 'referential'
+export type RuleType =
+  | 'not_null' | 'unique' | 'range' | 'regex' | 'custom_sql' | 'freshness' | 'row_count' | 'referential'
+  | 'null_check' | 'uniqueness_check' | 'duplicate_check' | 'accepted_values_check'
+  | 'range_check' | 'freshness_check' | 'volume_check' | 'schema_drift_check'
+  | 'referential_integrity_check' | 'regex_check' | 'business_rule_check' | 'custom_sql_check'
+  | 'semantic_consistency_check' | 'referential_sanity_check' | 'business_metric_check'
+  | 'distribution_consistency_check' | 'llm_semantic_check'
+
+export type RuleStatus = 'active' | 'draft' | 'pending_review' | 'disabled' | 'archived'
 
 export interface Rule {
   id: string
@@ -43,8 +51,12 @@ export interface Rule {
   columnName?: string
   parameters: Record<string, unknown>
   enabled: boolean
+  status: RuleStatus
   severity: 'critical' | 'high' | 'medium' | 'low'
   createdAt: string
+  lastRunAt?: string
+  lastRunStatus?: 'passed' | 'failed' | 'warning' | 'error'
+  lastRunScore?: number
 }
 
 export interface CheckResult {
