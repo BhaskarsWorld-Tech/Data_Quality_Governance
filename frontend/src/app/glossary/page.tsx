@@ -1,0 +1,122 @@
+'use client'
+import { useState } from 'react'
+
+interface GlossaryTerm {
+  id: string; name: string; definition: string; domain: string
+  synonyms: string[]; owner: string; linkedAssets: number
+  status: 'approved' | 'draft' | 'deprecated'
+}
+
+const TERMS: GlossaryTerm[] = [
+  { id: 'g1', name: 'Revenue', definition: 'Total income generated from sales of goods or services before any deductions', domain: 'Finance', synonyms: ['Sales', 'Income'], owner: 'CFO Office', linkedAssets: 14, status: 'approved' },
+  { id: 'g2', name: 'Customer', definition: 'An individual or organization that purchases goods or services from the company', domain: 'Sales', synonyms: ['Client', 'Account', 'Buyer'], owner: 'CRM Team', linkedAssets: 23, status: 'approved' },
+  { id: 'g3', name: 'Churn Rate', definition: 'Percentage of customers who stop using a product or service during a given time period', domain: 'Marketing', synonyms: ['Attrition Rate'], owner: 'Growth Team', linkedAssets: 8, status: 'approved' },
+  { id: 'g4', name: 'Lead Time', definition: 'Time elapsed from order placement to delivery of goods', domain: 'Supply Chain', synonyms: ['Delivery Time', 'Cycle Time'], owner: 'Logistics', linkedAssets: 5, status: 'approved' },
+  { id: 'g5', name: 'SKU', definition: 'Stock Keeping Unit — a unique identifier assigned to each product variant', domain: 'Supply Chain', synonyms: ['Product Code', 'Item ID'], owner: 'Inventory Team', linkedAssets: 18, status: 'approved' },
+  { id: 'g6', name: 'LTV', definition: 'Lifetime Value — predicted net profit attributed to the entire future relationship with a customer', domain: 'Marketing', synonyms: ['CLV', 'Customer Lifetime Value'], owner: 'Analytics', linkedAssets: 11, status: 'approved' },
+  { id: 'g7', name: 'GMV', definition: 'Gross Merchandise Value — total value of merchandise sold through a marketplace', domain: 'Finance', synonyms: ['Gross Revenue'], owner: 'Finance', linkedAssets: 7, status: 'draft' },
+  { id: 'g8', name: 'DAU', definition: 'Daily Active Users — number of unique users who engage with a product in a 24h period', domain: 'Engineering', synonyms: ['Active Users'], owner: 'Product', linkedAssets: 4, status: 'approved' },
+  { id: 'g9', name: 'MRR', definition: 'Monthly Recurring Revenue — predictable revenue a business can count on receiving monthly', domain: 'Finance', synonyms: ['Recurring Revenue'], owner: 'Finance', linkedAssets: 9, status: 'approved' },
+  { id: 'g10', name: 'COGS', definition: 'Cost of Goods Sold — direct costs attributable to the production of goods sold', domain: 'Finance', synonyms: ['Cost of Sales'], owner: 'Accounting', linkedAssets: 6, status: 'deprecated' },
+]
+
+const DOMAINS = ['All', 'Finance', 'Sales', 'Marketing', 'Supply Chain', 'Engineering']
+
+function statusStyle(s: string) {
+  if (s === 'approved') return { bg: '#dcfce7', color: '#16a34a' }
+  if (s === 'draft') return { bg: '#fef3c7', color: '#d97706' }
+  return { bg: '#f1f5f9', color: '#94a3b8' }
+}
+
+const card: React.CSSProperties = { background: '#fff', borderRadius: '12px', padding: '18px 20px', border: '1px solid #ebe8df' }
+
+export default function GlossaryPage() {
+  const [search, setSearch] = useState('')
+  const [domain, setDomain] = useState('All')
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  const filtered = TERMS.filter(t => {
+    if (domain !== 'All' && t.domain !== domain) return false
+    if (search && !t.name.toLowerCase().includes(search.toLowerCase()) && !t.definition.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
+  return (
+    <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
+      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Governance</span></div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>Business Glossary</h1>
+          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Standardized business terminology across the organization · {TERMS.length} terms defined</p>
+        </div>
+        <button style={{ background: '#E8541A', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>+ Add Term</button>
+      </div>
+
+      {/* Search + Filters */}
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', flex: '1 1 300px' }}>
+          <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '14px', opacity: 0.5 }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search terms, definitions..."
+            style={{ width: '100%', padding: '9px 12px 9px 38px', borderRadius: '8px', border: '1px solid #ebe8df', fontSize: '13px', background: '#fff', outline: 'none', boxSizing: 'border-box' }} />
+        </div>
+        <div style={{ display: 'flex', gap: '4px' }}>
+          {DOMAINS.map(d => (
+            <button key={d} onClick={() => setDomain(d)} style={{
+              padding: '7px 14px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+              fontSize: '12px', fontWeight: 500,
+              background: domain === d ? '#1a1a1a' : '#f8fafc', color: domain === d ? '#fff' : '#64748b',
+            }}>{d}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Terms List */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {filtered.map(term => {
+          const st = statusStyle(term.status)
+          const isOpen = expanded === term.id
+          return (
+            <div key={term.id} style={{ ...card, padding: '0', overflow: 'hidden' }}>
+              <div onClick={() => setExpanded(isOpen ? null : term.id)} style={{
+                display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 20px', cursor: 'pointer',
+                background: isOpen ? '#fafaf5' : '#fff', transition: 'background 0.15s',
+              }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', flexShrink: 0 }}>📖</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a1a' }}>{term.name}</div>
+                  <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: isOpen ? 'normal' : 'nowrap' }}>{term.definition}</div>
+                </div>
+                <span style={{ fontSize: '11px', color: '#94a3b8', flexShrink: 0 }}>{term.domain}</span>
+                <span style={{ background: st.bg, color: st.color, padding: '3px 10px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600, textTransform: 'capitalize', flexShrink: 0 }}>{term.status}</span>
+                <span style={{ color: '#94a3b8', fontSize: '14px', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+              </div>
+              {isOpen && (
+                <div style={{ padding: '0 20px 16px', borderTop: '1px solid #f3f1ea' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginTop: '14px' }}>
+                    <div>
+                      <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '6px' }}>SYNONYMS</div>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                        {term.synonyms.map(s => (
+                          <span key={s} style={{ background: '#f0f9ff', color: '#2563eb', padding: '3px 10px', borderRadius: '20px', fontSize: '11.5px', fontWeight: 500, border: '1px solid #bfdbfe' }}>{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '6px' }}>OWNER</div>
+                      <div style={{ fontSize: '13px', color: '#475569', fontWeight: 500 }}>{term.owner}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', marginBottom: '6px' }}>LINKED ASSETS</div>
+                      <div style={{ fontSize: '13px', color: '#2563eb', fontWeight: 600 }}>{term.linkedAssets} datasets</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

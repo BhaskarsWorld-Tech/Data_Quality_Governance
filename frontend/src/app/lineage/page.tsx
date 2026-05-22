@@ -1,68 +1,40 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 
-const NODES = [
-  // Sources
-  { id: 'sf1',   label: 'SF_Codex',        sub: 'Snowflake · CODEX',       type: 'source',    x: 40,  y: 60,  icon: '❄️' },
-  { id: 'pg1',   label: 'prod_db',          sub: 'PostgreSQL · orders',     type: 'source',    x: 40,  y: 190, icon: '🐘' },
-  { id: 'bq1',   label: 'bq_marketing',     sub: 'BigQuery · analytics',    type: 'source',    x: 40,  y: 320, icon: '📊' },
-  { id: 'api1',  label: 'payments_api',     sub: 'REST API · v2',           type: 'source',    x: 40,  y: 450, icon: '🔌' },
+/* ─── Types ─── */
+interface LineageNode {
+  id: string; label: string; sub: string
+  type: 'source' | 'raw' | 'transform' | 'warehouse' | 'output'
+  icon: string; schema: string; database: string; tableType: string
+  rowCount: number | null; columnCount: number
+  lastAltered: string | null; comment: string | null
+  x?: number; y?: number
+}
+interface LineageEdge { from: string; to: string; relationship: string }
+interface ConnectionInfo { name: string; database: string; schema: string; warehouse: string; status: string }
+interface LineageData { nodes: LineageNode[]; edges: LineageEdge[]; connection: ConnectionInfo }
 
-  // Raw / Ingestion
-  { id: 'raw1',  label: 'raw_orders',       sub: 'CODEX.RAW',               type: 'raw',       x: 240, y: 60,  icon: '📥' },
-  { id: 'raw2',  label: 'raw_customers',    sub: 'CODEX.RAW',               type: 'raw',       x: 240, y: 190, icon: '📥' },
-  { id: 'raw3',  label: 'raw_sessions',     sub: 'CODEX.RAW',               type: 'raw',       x: 240, y: 320, icon: '📥' },
-  { id: 'raw4',  label: 'raw_payments',     sub: 'CODEX.RAW',               type: 'raw',       x: 240, y: 450, icon: '📥' },
-
-  // Transforms (dbt models)
-  { id: 't1',    label: 'fact_orders',      sub: 'CODEX.PUBLIC · dbt',      type: 'transform', x: 450, y: 30,  icon: '⚙️' },
-  { id: 't2',    label: 'dim_customers',    sub: 'CODEX.PUBLIC · dbt',      type: 'transform', x: 450, y: 160, icon: '⚙️' },
-  { id: 't3',    label: 'fact_inventory',   sub: 'CODEX.PUBLIC · dbt',      type: 'transform', x: 450, y: 290, icon: '⚙️' },
-  { id: 't4',    label: 'fact_payments',    sub: 'CODEX.PUBLIC · dbt',      type: 'transform', x: 450, y: 420, icon: '⚙️' },
-  { id: 't5',    label: 'web_sessions',     sub: 'CODEX.ANALYTICS · dbt',   type: 'transform', x: 450, y: 540, icon: '⚙️' },
-
-  // Aggregations / Serving
-  { id: 'agg1',  label: 'revenue_by_channel', sub: 'CODEX.ANALYTICS · view', type: 'warehouse', x: 670, y: 80,  icon: '🗄️' },
-  { id: 'agg2',  label: 'customer_ltv',     sub: 'CODEX.ML · ML model',     type: 'warehouse', x: 670, y: 230, icon: '🗄️' },
-  { id: 'agg3',  label: 'fact_returns',     sub: 'CODEX.PUBLIC · table',    type: 'warehouse', x: 670, y: 380, icon: '🗄️' },
-  { id: 'agg4',  label: 'dim_products',     sub: 'CODEX.PUBLIC · table',    type: 'warehouse', x: 670, y: 510, icon: '🗄️' },
-
-  // Outputs
-  { id: 'out1',  label: 'Revenue Dashboard', sub: 'BI · Tableau',           type: 'output',    x: 890, y: 60,  icon: '📈' },
-  { id: 'out2',  label: 'Finance Report',    sub: 'Export · weekly',        type: 'output',    x: 890, y: 190, icon: '📋' },
-  { id: 'out3',  label: 'Churn ML Model',    sub: 'ML Pipeline · prod',     type: 'output',    x: 890, y: 310, icon: '🤖' },
-  { id: 'out4',  label: 'Marketing CDP',     sub: 'Integration · Segment',  type: 'output',    x: 890, y: 430, icon: '📣' },
-  { id: 'out5',  label: 'Ops Dashboard',     sub: 'BI · Grafana',           type: 'output',    x: 890, y: 540, icon: '⚡' },
+/* ─── Static fallback data (shown when no live connection) ─── */
+const STATIC_NODES: LineageNode[] = [
+  { id: 'sf1', label: 'SF_Codex', sub: 'Snowflake · CODEX', type: 'source', icon: '❄️', schema: '', database: 'CODEX', tableType: 'CONNECTION', rowCount: null, columnCount: 0, lastAltered: null, comment: null },
+  { id: 'raw1', label: 'raw_orders', sub: 'RAW · Table', type: 'raw', icon: '📥', schema: 'RAW', database: 'CODEX', tableType: 'BASE TABLE', rowCount: 124000, columnCount: 12, lastAltered: null, comment: null },
+  { id: 'raw2', label: 'raw_customers', sub: 'RAW · Table', type: 'raw', icon: '📥', schema: 'RAW', database: 'CODEX', tableType: 'BASE TABLE', rowCount: 45000, columnCount: 8, lastAltered: null, comment: null },
+  { id: 'raw3', label: 'raw_products', sub: 'RAW · Table', type: 'raw', icon: '📥', schema: 'RAW', database: 'CODEX', tableType: 'BASE TABLE', rowCount: 3200, columnCount: 15, lastAltered: null, comment: null },
+  { id: 't1', label: 'fact_orders', sub: 'PUBLIC · View', type: 'transform', icon: '👁', schema: 'PUBLIC', database: 'CODEX', tableType: 'VIEW', rowCount: null, columnCount: 18, lastAltered: null, comment: null },
+  { id: 't2', label: 'dim_customers', sub: 'PUBLIC · View', type: 'transform', icon: '👁', schema: 'PUBLIC', database: 'CODEX', tableType: 'VIEW', rowCount: null, columnCount: 10, lastAltered: null, comment: null },
+  { id: 't3', label: 'dim_products', sub: 'PUBLIC · Table', type: 'warehouse', icon: '📋', schema: 'PUBLIC', database: 'CODEX', tableType: 'BASE TABLE', rowCount: 3200, columnCount: 15, lastAltered: null, comment: null },
+  { id: 'agg1', label: 'revenue_summary', sub: 'ANALYTICS · View', type: 'output', icon: '📈', schema: 'ANALYTICS', database: 'CODEX', tableType: 'VIEW', rowCount: null, columnCount: 6, lastAltered: null, comment: null },
+]
+const STATIC_EDGES: LineageEdge[] = [
+  { from: 'sf1', to: 'raw1', relationship: 'source' }, { from: 'sf1', to: 'raw2', relationship: 'source' },
+  { from: 'sf1', to: 'raw3', relationship: 'source' }, { from: 'raw1', to: 't1', relationship: 'depends_on' },
+  { from: 'raw2', to: 't2', relationship: 'depends_on' }, { from: 'raw3', to: 't3', relationship: 'depends_on' },
+  { from: 't1', to: 'agg1', relationship: 'depends_on' }, { from: 't2', to: 'agg1', relationship: 'depends_on' },
 ]
 
-const EDGES = [
-  // Sources → Raw
-  { from: 'sf1',  to: 'raw1' }, { from: 'sf1',  to: 'raw2' }, { from: 'sf1', to: 'raw3' },
-  { from: 'pg1',  to: 'raw1' }, { from: 'pg1',  to: 'raw2' },
-  { from: 'bq1',  to: 'raw3' },
-  { from: 'api1', to: 'raw4' },
-  // Raw → Transforms
-  { from: 'raw1', to: 't1' }, { from: 'raw1', to: 't3' },
-  { from: 'raw2', to: 't2' },
-  { from: 'raw3', to: 't5' },
-  { from: 'raw4', to: 't4' },
-  // Transforms → Aggregations
-  { from: 't1',   to: 'agg1' }, { from: 't1',   to: 'agg3' },
-  { from: 't2',   to: 'agg2' },
-  { from: 't3',   to: 'agg3' },
-  { from: 't4',   to: 'agg1' }, { from: 't4',   to: 'agg3' },
-  { from: 't5',   to: 'agg2' },
-  { from: 'sf1',  to: 'agg4' },
-  // Aggregations → Outputs
-  { from: 'agg1', to: 'out1' }, { from: 'agg1', to: 'out2' },
-  { from: 'agg2', to: 'out3' }, { from: 'agg2', to: 'out4' },
-  { from: 'agg3', to: 'out2' }, { from: 'agg3', to: 'out5' },
-  { from: 'agg4', to: 'out5' },
-]
+const NODE_W = 170, NODE_H = 60
 
-const NODE_W = 160, NODE_H = 56
-
-const typeConfig = {
+const typeConfig: Record<string, { bg: string; border: string; color: string; label: string }> = {
   source:    { bg: '#eff6ff', border: '#93c5fd', color: '#1d4ed8', label: 'Source' },
   raw:       { bg: '#fdf4ff', border: '#e9d5ff', color: '#7e22ce', label: 'Raw' },
   transform: { bg: '#faf5ff', border: '#c4b5fd', color: '#7c3aed', label: 'Transform' },
@@ -70,30 +42,151 @@ const typeConfig = {
   output:    { bg: '#fff7ed', border: '#fdba74', color: '#c2410c', label: 'Output' },
 }
 
-function cx(node: typeof NODES[0]) { return node.x + NODE_W / 2 }
-function cy(node: typeof NODES[0]) { return node.y + NODE_H / 2 }
+/* ─── Layout engine ─── */
+function layoutNodes(nodes: LineageNode[], edges: LineageEdge[]): LineageNode[] {
+  // Topological sort + layer assignment
+  const adjOut = new Map<string, string[]>()
+  const adjIn = new Map<string, string[]>()
+  for (const n of nodes) { adjOut.set(n.id, []); adjIn.set(n.id, []) }
+  for (const e of edges) {
+    adjOut.get(e.from)?.push(e.to)
+    adjIn.get(e.to)?.push(e.from)
+  }
 
-// All searchable labels (label + sub)
-const allSearchTerms = NODES.map(n => ({
-  id: n.id,
-  text: n.label,
-  sub: n.sub,
-  type: n.type,
-  icon: n.icon,
-}))
+  // BFS from roots (nodes with no incoming)
+  const layers = new Map<string, number>()
+  const roots = nodes.filter(n => (adjIn.get(n.id) ?? []).length === 0)
+  const queue = roots.map(n => ({ id: n.id, layer: 0 }))
+  const visited = new Set<string>()
+
+  while (queue.length > 0) {
+    const { id, layer } = queue.shift()!
+    if (visited.has(id)) {
+      layers.set(id, Math.max(layers.get(id) ?? 0, layer))
+      continue
+    }
+    visited.add(id)
+    layers.set(id, layer)
+    for (const child of adjOut.get(id) ?? []) {
+      queue.push({ id: child, layer: layer + 1 })
+    }
+  }
+
+  // Assign positions for unvisited nodes
+  for (const n of nodes) {
+    if (!layers.has(n.id)) layers.set(n.id, 0)
+  }
+
+  // Group by layer
+  const layerGroups = new Map<number, string[]>()
+  for (const [id, layer] of layers) {
+    if (!layerGroups.has(layer)) layerGroups.set(layer, [])
+    layerGroups.get(layer)!.push(id)
+  }
+
+  const LAYER_X = 220
+  const START_X = 40
+  const START_Y = 60
+  const GAP_Y = 80
+
+  return nodes.map(n => {
+    const layer = layers.get(n.id) ?? 0
+    const group = layerGroups.get(layer) ?? [n.id]
+    const idx = group.indexOf(n.id)
+    return {
+      ...n,
+      x: START_X + layer * LAYER_X,
+      y: START_Y + idx * GAP_Y,
+    }
+  })
+}
+
+function cx(node: LineageNode) { return (node.x ?? 0) + NODE_W / 2 }
+function cy(node: LineageNode) { return (node.y ?? 0) + NODE_H / 2 }
 
 export default function LineagePage() {
+  const [data, setData] = useState<LineageData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isLive, setIsLive] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
+  const [columnData, setColumnData] = useState<Record<string, unknown>[] | null>(null)
+  const [columnsLoading, setColumnsLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const detailRef = useRef<HTMLDivElement>(null)
 
+  const fetchLineage = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/snowflake/lineage')
+      if (res.ok) {
+        const json = await res.json()
+        if (json.nodes && json.nodes.length > 0) {
+          setData(json)
+          setIsLive(true)
+          setLoading(false)
+          return
+        }
+      }
+    } catch {
+      // Fall through to static data
+    }
+    // Use static fallback
+    setData({
+      nodes: STATIC_NODES,
+      edges: STATIC_EDGES,
+      connection: { name: 'Demo', database: 'CODEX', schema: 'PUBLIC', warehouse: 'COMPUTE_WH', status: 'demo' },
+    })
+    setIsLive(false)
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { fetchLineage() }, [fetchLineage])
+
+  // Fetch columns for selected node
+  useEffect(() => {
+    if (!selected || !isLive) { setColumnData(null); return }
+    const node = data?.nodes.find(n => n.id === selected)
+    if (!node || node.type === 'source') { setColumnData(null); return }
+    setColumnsLoading(true)
+    fetch(`/api/snowflake/columns?table=${encodeURIComponent(node.label)}`)
+      .then(r => r.json())
+      .then(d => setColumnData(d.columns ?? []))
+      .catch(() => setColumnData(null))
+      .finally(() => setColumnsLoading(false))
+  }, [selected, isLive, data])
+
+  if (loading) {
+    return (
+      <div style={{ padding: '28px 36px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '400px', color: '#94a3b8', fontSize: '14px' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px', animation: 'spin 1s linear infinite' }}>⚙️</div>
+            <div>Loading lineage data...</div>
+            <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!data) return null
+
+  const laidOut = layoutNodes(data.nodes, data.edges)
+  const nodeMap = new Map(laidOut.map(n => [n.id, n]))
+
+  // Calculate SVG dimensions
+  const maxX = Math.max(...laidOut.map(n => (n.x ?? 0) + NODE_W)) + 60
+  const maxY = Math.max(...laidOut.map(n => (n.y ?? 0) + NODE_H)) + 60
+
   const matches = search.trim().length > 0
-    ? allSearchTerms.filter(t =>
-        t.text.toLowerCase().includes(search.toLowerCase()) ||
-        t.sub.toLowerCase().includes(search.toLowerCase()) ||
-        t.type.toLowerCase().includes(search.toLowerCase())
+    ? laidOut.filter(n =>
+        n.label.toLowerCase().includes(search.toLowerCase()) ||
+        n.sub.toLowerCase().includes(search.toLowerCase()) ||
+        n.type.toLowerCase().includes(search.toLowerCase())
       )
     : []
 
@@ -101,7 +194,6 @@ export default function LineagePage() {
     setSelected(id)
     setSearch(label)
     setShowDropdown(false)
-    // Scroll detail panel into view
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100)
   }
 
@@ -113,41 +205,59 @@ export default function LineagePage() {
   }
 
   const highlighted = selected
-    ? new Set([selected, ...EDGES.filter(e => e.from === selected || e.to === selected).flatMap(e => [e.from, e.to])])
+    ? new Set([selected, ...data.edges.filter(e => e.from === selected || e.to === selected).flatMap(e => [e.from, e.to])])
     : null
 
-  const selectedNode = selected ? NODES.find(n => n.id === selected) : null
-  const upstream = selected ? EDGES.filter(e => e.to === selected).map(e => NODES.find(n => n.id === e.from)!) : []
-  const downstream = selected ? EDGES.filter(e => e.from === selected).map(e => NODES.find(n => n.id === e.to)!) : []
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handle(e: MouseEvent) {
-      if (!(e.target as Element).closest('.lineage-search-box')) setShowDropdown(false)
-    }
-    document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
-  }, [])
+  const selectedNode = selected ? nodeMap.get(selected) : null
+  const upstream = selected ? data.edges.filter(e => e.to === selected).map(e => nodeMap.get(e.from)).filter(Boolean) as LineageNode[] : []
+  const downstream = selected ? data.edges.filter(e => e.from === selected).map(e => nodeMap.get(e.to)).filter(Boolean) as LineageNode[] : []
 
   return (
     <div style={{ padding: '28px 36px', maxWidth: '1400px' }}>
-      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Analytics platform</span></div>
+      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
+        Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
+      </div>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Data Lineage</h1>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0' }}>End-to-end data flow · search or click any node to trace dependencies</p>
+          <p style={{ fontSize: '13px', color: '#64748b', margin: '4px 0 0' }}>
+            {isLive
+              ? `Live from ${data.connection.name} · ${data.connection.database}.${data.connection.schema} · ${laidOut.length} objects`
+              : 'Demo mode · connect a Snowflake warehouse for live lineage'}
+          </p>
         </div>
 
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {Object.entries(typeConfig).map(([type, cfg]) => (
-            <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: cfg.bg, border: `1px solid ${cfg.border}`, padding: '4px 10px', borderRadius: '20px' }}>
-              <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: cfg.border }} />
-              <span style={{ fontSize: '11px', color: cfg.color, fontWeight: 500 }}>{cfg.label}</span>
-            </div>
-          ))}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Live/Demo indicator */}
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
+            background: isLive ? '#dcfce7' : '#fef3c7', color: isLive ? '#16a34a' : '#d97706',
+            padding: '5px 12px', borderRadius: '20px', fontSize: '11.5px', fontWeight: 600,
+          }}>
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: isLive ? '#16a34a' : '#d97706' }} />
+            {isLive ? 'LIVE' : 'DEMO'}
+          </span>
+
+          {/* Refresh */}
+          <button onClick={fetchLineage} style={{
+            background: '#fff', border: '1px solid #ebe8df', padding: '6px 14px',
+            borderRadius: '8px', fontSize: '12.5px', color: '#475569', cursor: 'pointer',
+            fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px',
+          }}>
+            🔄 Refresh
+          </button>
+
+          {/* Legend */}
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            {Object.entries(typeConfig).map(([type, cfg]) => (
+              <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '4px', background: cfg.bg, border: `1px solid ${cfg.border}`, padding: '3px 8px', borderRadius: '20px' }}>
+                <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: cfg.border }} />
+                <span style={{ fontSize: '10.5px', color: cfg.color, fontWeight: 500 }}>{cfg.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -160,29 +270,34 @@ export default function LineagePage() {
             value={search}
             onChange={e => { setSearch(e.target.value); setShowDropdown(true) }}
             onFocus={() => { if (search) setShowDropdown(true) }}
-            placeholder="Search objects — fact_orders, dim_customers, Revenue Dashboard…"
-            style={{ width: '100%', padding: '10px 40px 10px 38px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '13px', background: '#fff', color: '#0f172a', boxSizing: 'border-box', outline: 'none', boxShadow: showDropdown && matches.length > 0 ? '0 0 0 3px #dbeafe' : 'none', borderColor: showDropdown && matches.length > 0 ? '#93c5fd' : '#e2e8f0' }}
+            placeholder="Search tables, views, schemas..."
+            style={{
+              width: '100%', padding: '10px 40px 10px 38px', borderRadius: '10px',
+              border: '1px solid #e2e8f0', fontSize: '13px', background: '#fff',
+              color: '#0f172a', boxSizing: 'border-box', outline: 'none',
+              boxShadow: showDropdown && matches.length > 0 ? '0 0 0 3px #dbeafe' : 'none',
+              borderColor: showDropdown && matches.length > 0 ? '#93c5fd' : '#e2e8f0'
+            }}
           />
           {search && (
             <button onClick={clearSearch} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '16px', lineHeight: 1 }}>✕</button>
           )}
         </div>
 
-        {/* Dropdown */}
         {showDropdown && matches.length > 0 && (
           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 200, marginTop: '4px', maxHeight: '280px', overflowY: 'auto' }}>
             <div style={{ padding: '6px 12px', fontSize: '11px', color: '#94a3b8', fontWeight: 600, borderBottom: '1px solid #f3f1ea' }}>
               {matches.length} object{matches.length !== 1 ? 's' : ''} found
             </div>
             {matches.map(m => {
-              const cfg = typeConfig[m.type as keyof typeof typeConfig]
+              const cfg = typeConfig[m.type] ?? typeConfig.warehouse
               return (
-                <div key={m.id} onMouseDown={() => selectNode(m.id, m.text)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f8fafc' }}
+                <div key={m.id} onMouseDown={() => selectNode(m.id, m.label)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f8fafc' }}
                   onMouseEnter={e => (e.currentTarget.style.background = '#f0f9ff')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                   <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: cfg.bg, border: `1px solid ${cfg.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', flexShrink: 0 }}>{m.icon}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a1a' }}>{m.text}</div>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a1a' }}>{m.label}</div>
                     <div style={{ fontSize: '11.5px', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.sub}</div>
                   </div>
                   <span style={{ background: cfg.bg, color: cfg.color, padding: '2px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600, flexShrink: 0 }}>{m.type}</span>
@@ -201,7 +316,7 @@ export default function LineagePage() {
 
       {/* Graph */}
       <div style={{ background: '#fff', border: '1px solid #ebe8df', borderRadius: '14px', padding: '24px', overflowX: 'auto' }}>
-        <svg width="1100" height="640" viewBox="0 0 1100 640" style={{ display: 'block', minWidth: '1100px' }}>
+        <svg width={Math.max(maxX, 1100)} height={Math.max(maxY, 400)} viewBox={`0 0 ${Math.max(maxX, 1100)} ${Math.max(maxY, 400)}`} style={{ display: 'block', minWidth: `${Math.max(maxX, 1100)}px` }}>
           <defs>
             <marker id="arrow" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
               <path d="M0,0 L0,6 L7,3 z" fill="#cbd5e1" />
@@ -217,28 +332,19 @@ export default function LineagePage() {
             </marker>
           </defs>
 
-          {/* Lane labels */}
-          {[{ x: 40, label: 'SOURCES' }, { x: 240, label: 'RAW LAYER' }, { x: 450, label: 'TRANSFORMS' }, { x: 670, label: 'WAREHOUSE' }, { x: 890, label: 'OUTPUTS' }].map(lane => (
-            <text key={lane.x} x={lane.x + NODE_W / 2} y={20} textAnchor="middle" fontSize="10" fontWeight="600" fill="#94a3b8" letterSpacing="0.08em">{lane.label}</text>
-          ))}
-
-          {/* Lane dividers */}
-          {[220, 430, 640, 860].map(x => (
-            <line key={x} x1={x} y1={30} x2={x} y2={630} stroke="#f3f1ea" strokeWidth="1" strokeDasharray="4,4" />
-          ))}
-
           {/* Edges */}
-          {EDGES.map((edge, i) => {
-            const from = NODES.find(n => n.id === edge.from)!
-            const to   = NODES.find(n => n.id === edge.to)!
+          {data.edges.map((edge, i) => {
+            const from = nodeMap.get(edge.from)
+            const to = nodeMap.get(edge.to)
+            if (!from || !to) return null
             const fx = cx(from) + NODE_W / 2 - 8
             const fy = cy(from)
-            const tx = cx(to)  - NODE_W / 2 + 2
+            const tx = cx(to) - NODE_W / 2 + 2
             const ty = cy(to)
             const midX = (fx + tx) / 2
 
-            const isUpstream   = selected && highlighted?.has(edge.from) && highlighted?.has(edge.to) && EDGES.some(e => e.to === selected && e.from === edge.from)
-            const isDownstream = selected && highlighted?.has(edge.from) && highlighted?.has(edge.to) && EDGES.some(e => e.from === selected && e.to === edge.to)
+            const isUpstream = selected && highlighted?.has(edge.from) && highlighted?.has(edge.to) && data.edges.some(e => e.to === selected && e.from === edge.from)
+            const isDownstream = selected && highlighted?.has(edge.from) && highlighted?.has(edge.to) && data.edges.some(e => e.from === selected && e.to === edge.to)
             const isHL = highlighted?.has(edge.from) && highlighted?.has(edge.to)
 
             const stroke = isUpstream ? '#16a34a' : isDownstream ? '#ea580c' : isHL ? '#2563eb' : '#e2e8f0'
@@ -256,8 +362,8 @@ export default function LineagePage() {
           })}
 
           {/* Nodes */}
-          {NODES.map(node => {
-            const cfg = typeConfig[node.type as keyof typeof typeConfig]
+          {laidOut.map(node => {
+            const cfg = typeConfig[node.type] ?? typeConfig.warehouse
             const isSelected = selected === node.id
             const isDimmed = highlighted && !highlighted.has(node.id)
             return (
@@ -266,17 +372,24 @@ export default function LineagePage() {
                   if (selected === node.id) { setSelected(null); setSearch('') }
                   else { selectNode(node.id, node.label) }
                 }}>
-                <rect x={node.x} y={node.y} width={NODE_W} height={NODE_H} rx={9}
-                  fill={isSelected ? cfg.bg : cfg.bg}
+                <rect x={node.x ?? 0} y={node.y ?? 0} width={NODE_W} height={NODE_H} rx={9}
+                  fill={cfg.bg}
                   stroke={isSelected ? '#2563eb' : cfg.border}
                   strokeWidth={isSelected ? 2.5 : 1.5}
                   opacity={isDimmed ? 0.2 : 1}
                   filter={isSelected ? 'drop-shadow(0 0 8px rgba(37,99,235,0.35))' : undefined}
                   style={{ transition: 'all 0.2s' }}
                 />
-                <text x={node.x + 10} y={node.y + 22} fontSize="14" opacity={isDimmed ? 0.2 : 1}>{node.icon}</text>
-                <text x={node.x + 28} y={node.y + 22} fontSize="11.5" fontWeight={isSelected ? 700 : 600} fill={cfg.color} opacity={isDimmed ? 0.2 : 1}>{node.label}</text>
-                <text x={node.x + 28} y={node.y + 38} fontSize="9.5" fill={cfg.color} opacity={isDimmed ? 0.1 : 0.6}>{node.sub}</text>
+                <text x={(node.x ?? 0) + 10} y={(node.y ?? 0) + 24} fontSize="14" opacity={isDimmed ? 0.2 : 1}>{node.icon}</text>
+                <text x={(node.x ?? 0) + 30} y={(node.y ?? 0) + 24} fontSize="11.5" fontWeight={isSelected ? 700 : 600} fill={cfg.color} opacity={isDimmed ? 0.2 : 1}>
+                  {node.label.length > 18 ? node.label.slice(0, 16) + '…' : node.label}
+                </text>
+                <text x={(node.x ?? 0) + 30} y={(node.y ?? 0) + 40} fontSize="9.5" fill={cfg.color} opacity={isDimmed ? 0.1 : 0.6}>{node.sub}</text>
+                {node.rowCount != null && (
+                  <text x={(node.x ?? 0) + NODE_W - 8} y={(node.y ?? 0) + 52} fontSize="8.5" fill={cfg.color} opacity={isDimmed ? 0.1 : 0.4} textAnchor="end">
+                    {node.rowCount.toLocaleString()} rows
+                  </text>
+                )}
               </g>
             )
           })}
@@ -288,17 +401,63 @@ export default function LineagePage() {
         <div ref={detailRef} style={{ marginTop: '16px', background: '#fff', border: '1px solid #93c5fd', borderRadius: '12px', padding: '20px 24px', boxShadow: '0 4px 16px rgba(37,99,235,0.08)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: typeConfig[selectedNode.type as keyof typeof typeConfig].bg, border: `1px solid ${typeConfig[selectedNode.type as keyof typeof typeConfig].border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>{selectedNode.icon}</div>
+              <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: (typeConfig[selectedNode.type] ?? typeConfig.warehouse).bg, border: `1px solid ${(typeConfig[selectedNode.type] ?? typeConfig.warehouse).border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>{selectedNode.icon}</div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: '16px', color: '#1a1a1a' }}>{selectedNode.label}</div>
                 <div style={{ fontSize: '12.5px', color: '#94a3b8', marginTop: '2px' }}>{selectedNode.sub}</div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <span style={{ background: typeConfig[selectedNode.type as keyof typeof typeConfig].bg, color: typeConfig[selectedNode.type as keyof typeof typeConfig].color, padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, textTransform: 'capitalize' }}>{selectedNode.type}</span>
+              {selectedNode.rowCount != null && (
+                <span style={{ background: '#f0f9ff', color: '#2563eb', padding: '4px 10px', borderRadius: '20px', fontSize: '11.5px', fontWeight: 600 }}>
+                  {selectedNode.rowCount.toLocaleString()} rows
+                </span>
+              )}
+              {selectedNode.columnCount > 0 && (
+                <span style={{ background: '#faf5ff', color: '#7c3aed', padding: '4px 10px', borderRadius: '20px', fontSize: '11.5px', fontWeight: 600 }}>
+                  {selectedNode.columnCount} cols
+                </span>
+              )}
+              <span style={{ background: (typeConfig[selectedNode.type] ?? typeConfig.warehouse).bg, color: (typeConfig[selectedNode.type] ?? typeConfig.warehouse).color, padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, textTransform: 'capitalize' }}>{selectedNode.type}</span>
               <button onClick={clearSearch} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', width: '28px', height: '28px', borderRadius: '7px', cursor: 'pointer', color: '#94a3b8', fontSize: '14px' }}>✕</button>
             </div>
           </div>
+
+          {/* Metadata row */}
+          {(selectedNode.database || selectedNode.schema || selectedNode.lastAltered || selectedNode.comment) && (
+            <div style={{ display: 'flex', gap: '20px', marginBottom: '16px', fontSize: '12.5px', color: '#475569', background: '#fafaf5', padding: '10px 14px', borderRadius: '8px', flexWrap: 'wrap' }}>
+              {selectedNode.database && <span>🗄️ <strong>Database:</strong> {selectedNode.database}</span>}
+              {selectedNode.schema && <span>📁 <strong>Schema:</strong> {selectedNode.schema}</span>}
+              {selectedNode.lastAltered && <span>🕐 <strong>Modified:</strong> {new Date(selectedNode.lastAltered).toLocaleDateString()}</span>}
+              {selectedNode.comment && <span>💬 {selectedNode.comment}</span>}
+            </div>
+          )}
+
+          {/* Columns (live data only) */}
+          {isLive && selectedNode.type !== 'source' && (
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '8px' }}>
+                COLUMNS ({selectedNode.columnCount})
+              </div>
+              {columnsLoading ? (
+                <div style={{ fontSize: '12.5px', color: '#94a3b8', padding: '8px' }}>Loading columns...</div>
+              ) : columnData && columnData.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '6px' }}>
+                  {columnData.slice(0, 20).map((col: Record<string, unknown>, i: number) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', background: '#fafaf5', borderRadius: '6px', fontSize: '12px' }}>
+                      <span style={{ color: '#475569', fontWeight: 500 }}>{String(col.COLUMN_NAME ?? '')}</span>
+                      <span style={{ color: '#94a3b8', fontSize: '10px', fontFamily: 'monospace', textTransform: 'uppercase' }}>
+                        {String(col.DATA_TYPE ?? '').split('(')[0]}
+                      </span>
+                    </div>
+                  ))}
+                  {columnData.length > 20 && (
+                    <div style={{ fontSize: '11px', color: '#94a3b8', padding: '4px 8px' }}>+{columnData.length - 20} more</div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
             {/* Upstream */}
@@ -345,11 +504,11 @@ export default function LineagePage() {
           </div>
 
           {/* Impact summary */}
-          <div style={{ marginTop: '12px', background: '#f8fafc', borderRadius: '8px', padding: '10px 14px', fontSize: '12.5px', color: '#475569', display: 'flex', gap: '20px' }}>
+          <div style={{ marginTop: '12px', background: '#f8fafc', borderRadius: '8px', padding: '10px 14px', fontSize: '12.5px', color: '#475569', display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
             <span>📊 <strong>{upstream.length}</strong> upstream source{upstream.length !== 1 ? 's' : ''}</span>
             <span>📡 <strong>{downstream.length}</strong> downstream consumer{downstream.length !== 1 ? 's' : ''}</span>
             <span>🔗 <strong>{upstream.length + downstream.length}</strong> total connections</span>
-            <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>Click any upstream/downstream node to navigate to it</span>
+            <span style={{ marginLeft: 'auto', color: '#94a3b8' }}>Click any node to navigate</span>
           </div>
         </div>
       )}

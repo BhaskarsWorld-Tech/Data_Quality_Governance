@@ -1,8 +1,8 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { CheckResult } from '@/lib/types'
+import { CheckResult, Connection } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 
 interface DashboardStats {
@@ -15,6 +15,140 @@ interface DashboardStats {
 
 const TIME_OPTIONS = ['Last 1 hour','Last 6 hours','Last 24 hours','Last 7 days','Last 14 days','Last 30 days']
 const DOMAIN_OPTIONS = ['All domains','Finance','Marketing','Sales','Engineering','Supply Chain','Data Platform']
+
+/* ─── Connection Type Icons ─── */
+const connIcons: Record<string, string> = {
+  snowflake: '❄️', postgresql: '🐘', mysql: '🐬', bigquery: '📊',
+  redshift: '🔴', mongodb: '🍃', csv: '📄', api: '🔌',
+}
+
+/* ─── Connection Selector ─── */
+function ConnectionSelector() {
+  const [connections, setConnections] = useState<Connection[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/connections').then(r => r.json()).then(data => {
+      const conns = Array.isArray(data) ? data : (data.connections ?? [])
+      setConnections(conns)
+      const active = conns.find((c: Connection) => c.status === 'active')
+      if (active) setActiveId(active.id)
+      else if (conns.length > 0) setActiveId(conns[0].id)
+    }).catch(() => {})
+  }, [])
+
+  const active = connections.find(c => c.id === activeId)
+
+  async function handleRefresh() {
+    if (!active) return
+    setRefreshing(true)
+    try {
+      await fetch('/api/connections/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(active),
+      })
+      // Re-fetch connections
+      const r = await fetch('/api/connections')
+      const data = await r.json()
+      setConnections(Array.isArray(data) ? data : (data.connections ?? []))
+    } catch {}
+    setRefreshing(false)
+  }
+
+  if (connections.length === 0) {
+    return (
+      <Link href="/connections" style={{
+        display: 'inline-flex', alignItems: 'center', gap: '6px',
+        background: '#fff', border: '1px solid #ebe8df', padding: '6px 14px',
+        borderRadius: '8px', fontSize: '12.5px', color: '#E8541A', fontWeight: 600,
+        textDecoration: 'none', cursor: 'pointer',
+      }}>
+        + Add Connection
+      </Link>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', position: 'relative' }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '8px',
+          background: '#fff', border: '1px solid #ebe8df', padding: '7px 14px',
+          borderRadius: '8px', cursor: 'pointer', minWidth: '180px',
+          boxShadow: open ? '0 0 0 2px #dbeafe' : 'none',
+        }}
+      >
+        <span style={{ fontSize: '16px' }}>{active ? (connIcons[active.type] ?? '🔗') : '🔗'}</span>
+        <span style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a', flex: 1 }}>
+          {active?.name ?? 'Select connection'}
+        </span>
+        <span style={{
+          width: '8px', height: '8px', borderRadius: '50%',
+          background: active?.status === 'active' ? '#16a34a' : active?.status === 'error' ? '#dc2626' : '#d97706',
+          flexShrink: 0,
+        }} />
+        <span style={{ fontSize: '10px', color: '#94a3b8', transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
+      </div>
+
+      {/* Refresh button */}
+      <button
+        onClick={handleRefresh}
+        disabled={refreshing}
+        style={{
+          background: '#fff', border: '1px solid #ebe8df', width: '34px', height: '34px',
+          borderRadius: '8px', cursor: refreshing ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '14px', opacity: refreshing ? 0.5 : 1,
+          transition: 'all 0.2s',
+        }}
+        title="Refresh connection"
+      >
+        {refreshing ? '⏳' : '🔄'}
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, background: '#fff',
+          border: '1px solid #ebe8df', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          zIndex: 100, minWidth: '240px', overflow: 'hidden',
+        }}>
+          {connections.map(conn => (
+            <button key={conn.id} onClick={() => { setActiveId(conn.id); setOpen(false) }} style={{
+              display: 'flex', width: '100%', padding: '10px 14px', textAlign: 'left',
+              background: conn.id === activeId ? '#eff6ff' : '#fff', border: 'none',
+              alignItems: 'center', gap: '10px', cursor: 'pointer',
+              borderBottom: '1px solid #f3f1ea',
+            }}>
+              <span style={{ fontSize: '16px' }}>{connIcons[conn.type] ?? '🔗'}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: conn.id === activeId ? 600 : 400, color: conn.id === activeId ? '#2563eb' : '#374151' }}>
+                  {conn.id === activeId && '✓ '}{conn.name}
+                </div>
+                <div style={{ fontSize: '11px', color: '#94a3b8' }}>{conn.type} · {conn.database ?? conn.host ?? ''}</div>
+              </div>
+              <span style={{
+                width: '7px', height: '7px', borderRadius: '50%',
+                background: conn.status === 'active' ? '#16a34a' : conn.status === 'error' ? '#dc2626' : '#d97706',
+              }} />
+            </button>
+          ))}
+          <Link href="/connections" style={{
+            display: 'block', padding: '10px 14px', textAlign: 'center',
+            fontSize: '12.5px', color: '#E8541A', fontWeight: 600,
+            textDecoration: 'none', borderTop: '1px solid #ebe8df',
+          }}>
+            + Manage Connections
+          </Link>
+        </div>
+      )}
+    </div>
+  )
+}
 
 const dimensions = [
   { name: 'Completeness', score: 98, color: '#16a34a', category: 'completeness' },
@@ -187,6 +321,11 @@ export default function Dashboard({ stats }: { stats: DashboardStats }) {
     <div style={{ padding: '28px 36px', maxWidth: '1300px' }} onClick={() => setActiveMetric(null)}>
       <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
         Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
+      </div>
+
+      {/* Connection Selector Row */}
+      <div style={{ marginBottom: '16px' }}>
+        <ConnectionSelector />
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
