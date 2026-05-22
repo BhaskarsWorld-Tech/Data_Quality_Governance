@@ -2,7 +2,7 @@ import {
   Globe, Database, Shield, Calendar, Bell, ClipboardList, ClipboardCheck,
   PlayCircle, Settings, FolderKanban, User, BrainCircuit, HelpCircle,
   Search, BookOpen, Package, FileText, Sparkles, AlertOctagon, ShoppingBag,
-  BarChart2, Lock, Trash2, Layers, Gavel, Cpu, ScanSearch,
+  BarChart2, Lock, Trash2, Layers, Gavel, Cpu, ScanSearch, Eye, Link,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -40,6 +40,7 @@ export const NAV: NavSection[] = [
       { href: '/rules/approval-queue',label: 'Approval Queue', icon: ClipboardCheck },
       { href: '/assets',              label: 'Data Assets',    icon: Database },
       { href: '/assets/discovery',    label: 'Auto Discovery', icon: ScanSearch },
+      { href: '/data-browser',        label: 'Data Browser',   icon: Eye },
       { href: '/schedules',           label: 'Schedules',      icon: Calendar },
       { href: '/runs',                label: 'Execution Logs', icon: PlayCircle },
     ],
@@ -51,6 +52,7 @@ export const NAV: NavSection[] = [
     items: [
       { href: '/alerts', label: 'Alerts',     icon: Bell,          badgeKey: 'open_alerts' },
       { href: '/audit',  label: 'Audit Logs', icon: ClipboardList },
+      { href: '/settings', label: 'Connections', icon: Link },
     ],
   },
   {

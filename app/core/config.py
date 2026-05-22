@@ -11,7 +11,7 @@ _WEAK_SECRET_KEYS = {
 
 class Settings(BaseSettings):
     app_env: str = "local"
-    app_name: str = "Data Quality & Governance"
+    app_name: str = "DataGuard"
     debug: bool = False
 
     # ── Platform Snowflake connection (app's own tables: DQ_PLATFORM_DB.DQ_APP) ──

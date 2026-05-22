@@ -9,6 +9,25 @@ RuleType = Literal[
 ]
 Severity = Literal["critical", "high", "medium", "low"]
 RuleStatus = Literal["draft", "pending_review", "approved", "active", "disabled", "archived"]
+QualityDimension = Literal[
+    "completeness", "accuracy", "uniqueness", "validity", "timeliness", "consistency"
+]
+
+# Mapping from rule_type to quality dimension for auto-categorization
+RULE_TYPE_TO_DIMENSION: dict[str, str] = {
+    "null_check": "completeness",
+    "volume_check": "completeness",
+    "uniqueness_check": "uniqueness",
+    "duplicate_check": "uniqueness",
+    "range_check": "validity",
+    "accepted_values_check": "validity",
+    "regex_check": "validity",
+    "freshness_check": "timeliness",
+    "referential_integrity_check": "consistency",
+    "schema_drift_check": "consistency",
+    "business_rule_check": "accuracy",
+    "custom_sql_check": "accuracy",
+}
 
 
 class RuleCreate(BaseModel):
@@ -18,7 +37,7 @@ class RuleCreate(BaseModel):
     subdomain_id: str
     asset_id: str
     rule_type: RuleType
-    rule_category: Optional[str] = None
+    rule_category: Optional[QualityDimension] = None
     target_column: Optional[str] = None
     rule_sql: Optional[str] = None
     rule_config: Optional[dict[str, Any]] = None

@@ -5,8 +5,8 @@ import { ThemeProvider } from '@/components/layout/ThemeProvider'
 import { Toaster } from 'sonner'
 
 export const metadata: Metadata = {
-  title: 'DataGuardian',
-  description: 'DataGuardian — Enterprise Data Intelligence Platform powered by Snowflake & AI',
+  title: 'DataGuard',
+  description: 'DataGuard — Enterprise Data Quality & Governance Platform powered by AI',
 }
 
 // Inline script executed before React hydrates → prevents flash of wrong theme

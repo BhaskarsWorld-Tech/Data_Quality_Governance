@@ -68,7 +68,7 @@ export default function TopBar({ alertCount, onHamburgerClick }: TopBarProps) {
         <Link href="/dashboard/global" className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg overflow-hidden bg-[#0f172a] flex items-center justify-center shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo-icon.svg" alt="DataGuardian" width={28} height={28} className="w-full h-full" />
+            <img src="/logo-icon.svg" alt="DataGuard" width={28} height={28} className="w-full h-full" />
           </div>
           <span
             className="text-[14px] font-extrabold tracking-[-0.3px] whitespace-nowrap"

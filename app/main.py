@@ -31,7 +31,7 @@ from app.api.oauth import router as oauth_router
 from app.api.service_accounts import router as service_accounts_router
 
 setup_logging()
-logger = logging.getLogger("dq_platform")
+logger = logging.getLogger("dataguard")
 
 _IS_PRODUCTION = settings.app_env.lower() in ("production", "prod")
 
@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
     _bootstrap_secrets(settings)
 
     _validate_security_config()
-    logger.info("Starting Data Quality Platform...")
+    logger.info("Starting DataGuard Platform...")
 
     async def _init_db():
         await asyncio.to_thread(create_tables)
@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
     from app.db.snowflake_pool import close_all_pools
     close_all_pools()
-    logger.info("Shutting down Data Quality Platform")
+    logger.info("Shutting down DataGuard Platform")
 
 
 # Disable interactive API docs in production to reduce attack surface.
@@ -107,9 +107,9 @@ _docs_url = "/docs" if not _IS_PRODUCTION else None
 _redoc_url = "/redoc" if not _IS_PRODUCTION else None
 
 app = FastAPI(
-    title="Data Quality Platform",
-    description="Enterprise Snowflake Data Quality Platform with AI/LLM capabilities",
-    version="2.0.0",
+    title="DataGuard",
+    description="Enterprise Data Quality & Governance Platform with AI/LLM capabilities",
+    version="3.0.0",
     lifespan=lifespan,
     docs_url=_docs_url,
     redoc_url=_redoc_url,
@@ -204,7 +204,7 @@ async def health():
     return {
         "status": status_str,
         "app": settings.app_name,
-        "version": "2.0.0",
+        "version": "3.0.0",
         "env": settings.app_env,
         "checks": {
             "database": "ok" if db_ok else f"error: {db_error}",
@@ -214,4 +214,4 @@ async def health():
 
 @app.get("/", tags=["Health"])
 async def root():
-    return {"message": "Data Quality Platform API", "docs": "/docs", "version": "2.0.0"}
+    return {"message": "DataGuard API", "docs": "/docs", "version": "3.0.0"}

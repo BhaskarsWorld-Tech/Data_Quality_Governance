@@ -303,9 +303,9 @@ type ChatMode = 'general' | 'governance'
 
 const WELCOME: Message = {
   role: 'assistant',
-  content: `### Welcome to DataGuardian AI
+  content: `### Welcome to DataGuard AI
 
-I'm your AI expert for DataGuardian. I have live access to your platform data and can answer questions about:
+I'm your AI expert for DataGuard. I have live access to your platform data and can answer questions about:
 
 - **Quality scores** — global, domain, subdomain, and table level
 - **Rules & executions** — failures, passing rates, execution history

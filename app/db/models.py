@@ -361,6 +361,8 @@ class SnowflakeConnection(Base):
 
     connection_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
     connection_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # database_type: snowflake | postgresql | mysql | bigquery | redshift | mongodb | csv | api
+    database_type: Mapped[str] = mapped_column(String(30), default="snowflake")
     account: Mapped[str] = mapped_column(String(300), nullable=False)
     sf_user: Mapped[str] = mapped_column(String(200), nullable=False)
     password: Mapped[str | None] = mapped_column(Text)
@@ -372,6 +374,23 @@ class SnowflakeConnection(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     connection_type: Mapped[str] = mapped_column(String(50), default="named")
     is_primary_target: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Multi-database fields (host-based DBs: PostgreSQL, MySQL, Redshift)
+    host: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # BigQuery
+    project: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    key_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # MongoDB
+    connection_string: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # CSV / File
+    file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delimiter: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # REST API
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    auth_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Test diagnostics
+    last_test_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 

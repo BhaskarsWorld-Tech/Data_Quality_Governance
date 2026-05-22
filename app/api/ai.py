@@ -1,6 +1,7 @@
 import json as _json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.schemas.ai import (
@@ -747,6 +748,461 @@ async def rule_remediation_playbook(
         raise HTTPException(503, f"LLM error: {e}")
 
     return {"rule_id": rule_id, "rule_name": rule.rule_name, "rule_type": rule.rule_type, "playbook": playbook}
+
+
+# ── §70 Agentic Tool-Use Interface ───────────────────────────────────────────
+# Ported from Repo 2: Claude AI agent with tool execution loop
+
+class AgentChatRequest(BaseModel):
+    messages: list[dict]  # [{role, content}]
+
+
+AGENT_TOOLS = [
+    {
+        "name": "list_connections",
+        "description": "List all data source connections configured in DataGuard",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "list_rules",
+        "description": "List data quality rules. Can filter by category, status, or severity.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "Filter by category (completeness, accuracy, uniqueness, validity, timeliness, consistency)"},
+                "severity": {"type": "string", "description": "Filter by severity (critical, high, medium, low)"},
+                "status": {"type": "string", "description": "Filter by status (active, pending_review, draft)"},
+                "limit": {"type": "integer", "description": "Max results (default 20)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_dashboard_stats",
+        "description": "Get overall platform statistics: quality scores, rule counts, alert summary, domain health",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_alerts",
+        "description": "Get recent quality alerts and their status",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "Filter: open, acknowledged, resolved"},
+                "severity": {"type": "string", "description": "Filter: critical, high, medium, low"},
+                "limit": {"type": "integer", "description": "Max results (default 10)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_domains",
+        "description": "List all data domains with their quality scores and asset counts",
+        "input_schema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "get_recent_runs",
+        "description": "Get recent rule execution results with pass/fail details",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max results (default 10)"},
+                "status": {"type": "string", "description": "Filter: passed, failed, error"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "search_assets",
+        "description": "Search data assets (tables/views) by name or description",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search term for table/asset name"},
+                "limit": {"type": "integer", "description": "Max results (default 10)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "execute_rules",
+        "description": "Trigger execution of quality rules for a specific asset",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "asset_id": {"type": "string", "description": "Asset ID to run rules for"}
+            },
+            "required": ["asset_id"]
+        }
+    },
+]
+
+
+async def _execute_agent_tool(tool_name: str, tool_input: dict, db: AsyncSession) -> dict:
+    """Execute an agent tool and return the result."""
+    from sqlalchemy import select, desc, func
+    from app.db.models import (
+        SnowflakeConnection, DQRule, DQRuleRun, DQAlert,
+        Domain, Subdomain, DataAsset, DQQualityScore
+    )
+
+    try:
+        if tool_name == "list_connections":
+            result = await db.execute(
+                select(SnowflakeConnection).order_by(SnowflakeConnection.connection_name)
+            )
+            conns = result.scalars().all()
+            return {
+                "connections": [
+                    {
+                        "id": c.connection_id, "name": c.connection_name,
+                        "type": c.database_type or "snowflake",
+                        "status": "active" if c.is_active else "inactive",
+                        "account": c.account, "warehouse": c.warehouse,
+                        "host": c.host, "database": c.default_database,
+                    }
+                    for c in conns
+                ],
+                "total": len(conns)
+            }
+
+        elif tool_name == "list_rules":
+            stmt = select(DQRule).order_by(desc(DQRule.created_at))
+            if tool_input.get("severity"):
+                stmt = stmt.where(DQRule.severity == tool_input["severity"])
+            if tool_input.get("status"):
+                stmt = stmt.where(DQRule.status == tool_input["status"])
+            if tool_input.get("category"):
+                stmt = stmt.where(DQRule.rule_category == tool_input["category"])
+            stmt = stmt.limit(tool_input.get("limit", 20))
+            result = await db.execute(stmt)
+            rules = result.scalars().all()
+            return {
+                "rules": [
+                    {
+                        "id": r.rule_id, "name": r.rule_name, "type": r.rule_type,
+                        "category": r.rule_category, "severity": r.severity,
+                        "status": r.status, "is_active": r.is_active,
+                        "target_column": r.target_column,
+                    }
+                    for r in rules
+                ],
+                "total": len(rules)
+            }
+
+        elif tool_name == "get_dashboard_stats":
+            rules_count = (await db.execute(select(func.count(DQRule.rule_id)))).scalar() or 0
+            active_rules = (await db.execute(
+                select(func.count(DQRule.rule_id)).where(DQRule.is_active == True)
+            )).scalar() or 0
+            assets_count = (await db.execute(select(func.count(DataAsset.asset_id)))).scalar() or 0
+            domains_count = (await db.execute(select(func.count(Domain.domain_id)))).scalar() or 0
+            open_alerts = (await db.execute(
+                select(func.count(DQAlert.alert_id)).where(DQAlert.status == "open")
+            )).scalar() or 0
+            critical_alerts = (await db.execute(
+                select(func.count(DQAlert.alert_id)).where(
+                    DQAlert.status == "open", DQAlert.severity == "critical"
+                )
+            )).scalar() or 0
+
+            # Latest global quality score
+            latest_score = await db.execute(
+                select(DQQualityScore)
+                .where(DQQualityScore.level == "global")
+                .order_by(desc(DQQualityScore.calculated_at))
+                .limit(1)
+            )
+            score_row = latest_score.scalar_one_or_none()
+            overall_score = score_row.score if score_row else None
+
+            return {
+                "total_rules": rules_count,
+                "active_rules": active_rules,
+                "total_assets": assets_count,
+                "total_domains": domains_count,
+                "open_alerts": open_alerts,
+                "critical_alerts": critical_alerts,
+                "overall_quality_score": overall_score,
+            }
+
+        elif tool_name == "get_alerts":
+            stmt = select(DQAlert).order_by(desc(DQAlert.created_at))
+            if tool_input.get("status"):
+                stmt = stmt.where(DQAlert.status == tool_input["status"])
+            if tool_input.get("severity"):
+                stmt = stmt.where(DQAlert.severity == tool_input["severity"])
+            stmt = stmt.limit(tool_input.get("limit", 10))
+            result = await db.execute(stmt)
+            alerts = result.scalars().all()
+            return {
+                "alerts": [
+                    {
+                        "id": a.alert_id, "severity": a.severity,
+                        "status": a.status, "message": a.message,
+                        "created_at": a.created_at.isoformat() if a.created_at else None,
+                    }
+                    for a in alerts
+                ],
+                "total": len(alerts)
+            }
+
+        elif tool_name == "get_domains":
+            result = await db.execute(select(Domain).order_by(Domain.domain_name))
+            domains = result.scalars().all()
+            domain_data = []
+            for d in domains:
+                asset_count = (await db.execute(
+                    select(func.count(DataAsset.asset_id)).where(DataAsset.domain_id == d.domain_id)
+                )).scalar() or 0
+                rule_count = (await db.execute(
+                    select(func.count(DQRule.rule_id)).where(DQRule.domain_id == d.domain_id)
+                )).scalar() or 0
+                domain_data.append({
+                    "id": d.domain_id, "name": d.domain_name,
+                    "description": d.description,
+                    "asset_count": asset_count, "rule_count": rule_count,
+                })
+            return {"domains": domain_data, "total": len(domain_data)}
+
+        elif tool_name == "get_recent_runs":
+            stmt = select(DQRuleRun).order_by(desc(DQRuleRun.created_at))
+            if tool_input.get("status"):
+                stmt = stmt.where(DQRuleRun.status == tool_input["status"])
+            stmt = stmt.limit(tool_input.get("limit", 10))
+            result = await db.execute(stmt)
+            runs = result.scalars().all()
+            return {
+                "runs": [
+                    {
+                        "id": r.run_id, "rule_id": r.rule_id, "status": r.status,
+                        "total_rows": r.total_rows_scanned, "failed_rows": r.failed_rows_count,
+                        "failure_pct": r.failure_percentage,
+                        "executed_at": r.created_at.isoformat() if r.created_at else None,
+                    }
+                    for r in runs
+                ],
+                "total": len(runs)
+            }
+
+        elif tool_name == "search_assets":
+            query = tool_input.get("query", "")
+            stmt = select(DataAsset).where(
+                DataAsset.sf_table_name.ilike(f"%{query}%")
+            ).limit(tool_input.get("limit", 10))
+            result = await db.execute(stmt)
+            assets = result.scalars().all()
+            return {
+                "assets": [
+                    {
+                        "id": a.asset_id, "table": a.sf_table_name,
+                        "schema": a.sf_schema_name, "database": a.sf_database_name,
+                        "domain_id": a.domain_id, "certification": a.certification_status,
+                        "criticality": a.criticality,
+                    }
+                    for a in assets
+                ],
+                "total": len(assets)
+            }
+
+        elif tool_name == "execute_rules":
+            asset_id = tool_input.get("asset_id")
+            if not asset_id:
+                return {"error": "asset_id is required"}
+            # Find active rules for this asset
+            result = await db.execute(
+                select(DQRule).where(DQRule.asset_id == asset_id, DQRule.is_active == True)
+            )
+            rules = result.scalars().all()
+            return {
+                "message": f"Found {len(rules)} active rules for asset. Use the /execute/bulk endpoint to trigger execution.",
+                "rule_count": len(rules),
+                "rules": [{"id": r.rule_id, "name": r.rule_name, "type": r.rule_type} for r in rules]
+            }
+
+        else:
+            return {"error": f"Unknown tool: {tool_name}"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/agent")
+async def agent_chat(
+    payload: AgentChatRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Agentic AI interface with tool execution loop.
+    The AI can query platform data, list rules/connections/alerts,
+    and provide intelligent recommendations.
+    """
+    from app.services.llm_providers import get_provider_from_db
+    from app.services.config_service import get_value
+    from app.core.config import settings
+
+    # Get the active LLM provider
+    provider_name = await get_value("llm_provider", db) or settings.llm_provider or "ollama"
+
+    system_prompt = """You are DataGuard AI, an expert Data Quality & Governance assistant.
+You have access to tools that let you query the DataGuard platform in real-time.
+Use them to answer questions about data quality scores, rules, alerts, connections, and domains.
+
+When users ask about platform health, use get_dashboard_stats.
+When users ask about rules, use list_rules with appropriate filters.
+When users ask about alerts or issues, use get_alerts.
+When users ask about domains, use get_domains.
+When users ask about recent checks, use get_recent_runs.
+When users ask about tables or datasets, use search_assets.
+
+Be conversational, helpful, and proactive. Format responses with markdown for readability.
+Always explain the data quality impact and recommend next steps."""
+
+    messages = payload.messages
+
+    # Try Anthropic provider first (best for tool use)
+    anthropic_key = await get_value("anthropic_api_key", db) or settings.anthropic_api_key or ""
+    openai_key = await get_value("openai_api_key", db) or settings.openai_api_key or ""
+
+    if anthropic_key:
+        return await _agent_loop_anthropic(anthropic_key, system_prompt, messages, db)
+    elif openai_key:
+        return await _agent_loop_openai(openai_key, system_prompt, messages, db)
+    else:
+        # Fallback: use configured provider without tool use
+        return await _agent_loop_fallback(system_prompt, messages, db)
+
+
+async def _agent_loop_anthropic(api_key: str, system_prompt: str, messages: list[dict], db: AsyncSession) -> dict:
+    """Agentic loop using Anthropic Claude with native tool use."""
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # Convert tools to Anthropic format
+    anthropic_tools = []
+    for t in AGENT_TOOLS:
+        anthropic_tools.append({
+            "name": t["name"],
+            "description": t["description"],
+            "input_schema": t["input_schema"]
+        })
+
+    anthropic_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+    final_response = ""
+    tools_used = []
+    current_messages = list(anthropic_messages)
+
+    for _ in range(5):  # max 5 iterations
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2048,
+                system=system_prompt,
+                tools=anthropic_tools,
+                messages=current_messages,
+            )
+        except Exception as e:
+            return {"response": f"AI service error: {str(e)}", "tools_used": tools_used}
+
+        if response.stop_reason == "tool_use":
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    tools_used.append(block.name)
+                    result = await _execute_agent_tool(block.name, block.input, db)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": _json.dumps(result, default=str)
+                    })
+
+            current_messages.append({"role": "assistant", "content": response.content})
+            current_messages.append({"role": "user", "content": tool_results})
+        else:
+            for block in response.content:
+                if hasattr(block, "text"):
+                    final_response = block.text
+                    break
+            break
+
+    return {"response": final_response, "tools_used": tools_used}
+
+
+async def _agent_loop_openai(api_key: str, system_prompt: str, messages: list[dict], db: AsyncSession) -> dict:
+    """Agentic loop using OpenAI with function calling."""
+    import openai
+
+    client = openai.OpenAI(api_key=api_key)
+
+    openai_tools = []
+    for t in AGENT_TOOLS:
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"]
+            }
+        })
+
+    openai_messages = [{"role": "system", "content": system_prompt}]
+    openai_messages.extend([{"role": m["role"], "content": m["content"]} for m in messages])
+
+    tools_used = []
+
+    for _ in range(5):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=openai_messages,
+                tools=openai_tools,
+            )
+        except Exception as e:
+            return {"response": f"AI service error: {str(e)}", "tools_used": tools_used}
+
+        choice = response.choices[0]
+        if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+            openai_messages.append(choice.message)
+            for tc in choice.message.tool_calls:
+                tools_used.append(tc.function.name)
+                args = _json.loads(tc.function.arguments) if tc.function.arguments else {}
+                result = await _execute_agent_tool(tc.function.name, args, db)
+                openai_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": _json.dumps(result, default=str)
+                })
+        else:
+            return {"response": choice.message.content or "", "tools_used": tools_used}
+
+    return {"response": "Agent reached maximum iterations.", "tools_used": tools_used}
+
+
+async def _agent_loop_fallback(system_prompt: str, messages: list[dict], db: AsyncSession) -> dict:
+    """Fallback: use the configured LLM provider without tool use."""
+    from app.services.llm_providers import get_provider_from_db
+
+    # Gather some context automatically
+    context_parts = []
+    try:
+        stats = await _execute_agent_tool("get_dashboard_stats", {}, db)
+        context_parts.append(f"Platform stats: {_json.dumps(stats, default=str)}")
+    except Exception:
+        pass
+
+    provider = await get_provider_from_db(None, db)
+    user_msg = messages[-1]["content"] if messages else ""
+    ctx = "\n".join(context_parts)
+    prompt = f"Platform context:\n{ctx}\n\nUser question: {user_msg}" if ctx else user_msg
+
+    try:
+        response = await provider.complete(prompt, system=system_prompt, max_tokens=1500)
+        return {"response": response, "tools_used": []}
+    except Exception as e:
+        return {"response": f"AI service error: {str(e)}", "tools_used": []}
 
 
 @router.post("/incidents/{incident_id}/generate-postmortem")

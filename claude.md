@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Enterprise Snowflake Data Quality & Governance platform. Backend: FastAPI + SQLAlchemy (snowflake-sqlalchemy). Frontend: Next.js 15 + TypeScript + Tailwind.
+**DataGuard** — Enterprise Data Quality & Governance platform. Backend: FastAPI + SQLAlchemy (snowflake-sqlalchemy). Frontend: Next.js 15 + TypeScript + Tailwind. Supports multi-database connections (Snowflake, PostgreSQL, MySQL, BigQuery, Redshift, MongoDB, CSV, REST API).
 
 ## Development Commands
 

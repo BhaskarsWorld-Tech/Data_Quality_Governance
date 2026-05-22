@@ -4,6 +4,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import AIChatBot from '@/components/ai/AIChatBot'
+import AgentChat from '@/components/agent/AgentChat'
 import CommandPalette from './CommandPalette'
 import { TimezoneProvider } from '@/contexts/TimezoneContext'
 import { getActiveSectionId } from './nav-config'
@@ -109,7 +110,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       <main className="main-content">
         {children}
       </main>
-      <AIChatBot />
+      <AgentChat />
       <CommandPalette />
     </TimezoneProvider>
   )
