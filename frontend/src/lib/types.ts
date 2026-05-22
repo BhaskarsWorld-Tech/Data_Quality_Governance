@@ -72,6 +72,10 @@ export interface CheckResult {
   executedAt: string
   duration: number
   details?: string
+  ruleType?: RuleType
+  ruleCategory?: RuleCategory
+  severity?: 'critical' | 'high' | 'medium' | 'low'
+  scope?: 'generic' | 'object-specific'
 }
 
 export interface Report {

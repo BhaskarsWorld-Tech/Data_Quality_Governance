@@ -1,7 +1,7 @@
 'use client'
 import { useState, useMemo } from 'react'
 import { Report, CheckResult } from '@/lib/types'
-import { formatDateTime, formatNumber } from '@/lib/utils'
+import { formatDateTime, formatNumber, categoryColors } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 
 /* ── Config ──────────────────────────────────────────────────────── */
@@ -10,6 +10,13 @@ const statusConfig = {
   passed:  { bg: '#dcfce7', color: '#16a34a', label: '✓ Passed',  dot: '#16a34a' },
   failed:  { bg: '#fee2e2', color: '#dc2626', label: '✗ Failed',  dot: '#dc2626' },
   warning: { bg: '#fef9c3', color: '#ca8a04', label: '⚠ Warning', dot: '#ca8a04' },
+}
+
+const severityConfig: Record<string, { bg: string; color: string; label: string }> = {
+  critical: { bg: '#fee2e2', color: '#dc2626', label: 'Critical' },
+  high:     { bg: '#ffedd5', color: '#ea580c', label: 'High' },
+  medium:   { bg: '#fef9c3', color: '#ca8a04', label: 'Medium' },
+  low:      { bg: '#f0fdf4', color: '#16a34a', label: 'Low' },
 }
 
 const REPORT_TYPES = [
@@ -39,6 +46,23 @@ const sel: React.CSSProperties = { width: '100%', padding: '9px 12px', borderRad
 const scoreColor = (s: number) => s >= 90 ? '#16a34a' : s >= 75 ? '#ea8b3a' : '#dc2626'
 const scoreBg = (s: number) => s >= 90 ? '#dcfce7' : s >= 75 ? '#fef3c7' : '#fee2e2'
 
+function ruleTypeLabel(type?: string): string {
+  if (!type) return 'Check'
+  const map: Record<string, string> = {
+    not_null: 'Not Null', unique: 'Unique', range: 'Range', regex: 'Regex',
+    custom_sql: 'Custom SQL', freshness: 'Freshness', row_count: 'Row Count',
+    referential: 'Referential', null_check: 'Null Check', uniqueness_check: 'Uniqueness',
+    duplicate_check: 'Duplicate', accepted_values_check: 'Accepted Values',
+    range_check: 'Range', freshness_check: 'Freshness', volume_check: 'Volume',
+    schema_drift_check: 'Schema Drift', referential_integrity_check: 'Ref. Integrity',
+    regex_check: 'Regex', business_rule_check: 'Business Rule', custom_sql_check: 'Custom SQL',
+    semantic_consistency_check: 'Semantic', referential_sanity_check: 'Ref. Sanity',
+    business_metric_check: 'Business Metric', distribution_consistency_check: 'Distribution',
+    llm_semantic_check: 'LLM Semantic',
+  }
+  return map[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 /* ── Main Component ──────────────────────────────────────────────── */
 
 export default function ReportsClient({ initialReports }: { initialReports: Report[] }) {
@@ -50,6 +74,9 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
   const [showModal, setShowModal] = useState(false)
   const [expandedResult, setExpandedResult] = useState<number | null>(null)
   const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed' | 'warning'>('all')
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'generic' | 'object-specific'>('all')
+  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [resultSearch, setResultSearch] = useState('')
   const [form, setForm] = useState({
     name: '', type: 'quality', format: 'web',
     domain: 'All Domains', dataset: 'All Datasets',
@@ -72,9 +99,37 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
 
   const filteredResults = useMemo(() => {
     if (!selected) return []
-    if (statusFilter === 'all') return selected.results
-    return selected.results.filter(r => r.status === statusFilter)
-  }, [selected, statusFilter])
+    let results = selected.results
+    if (statusFilter !== 'all') results = results.filter(r => r.status === statusFilter)
+    if (scopeFilter !== 'all') results = results.filter(r => (r.scope || 'generic') === scopeFilter)
+    if (categoryFilter !== 'all') results = results.filter(r => r.ruleCategory === categoryFilter)
+    if (resultSearch.trim()) {
+      const q = resultSearch.toLowerCase()
+      results = results.filter(r =>
+        r.ruleName.toLowerCase().includes(q) ||
+        r.tableName.toLowerCase().includes(q) ||
+        (r.columnName && r.columnName.toLowerCase().includes(q)) ||
+        (r.ruleType && r.ruleType.toLowerCase().includes(q))
+      )
+    }
+    return results
+  }, [selected, statusFilter, scopeFilter, categoryFilter, resultSearch])
+
+  /* Category breakdown for selected report */
+  const categoryBreakdown = useMemo(() => {
+    if (!selected) return []
+    const cats = new Map<string, { total: number; passed: number; failed: number; warnings: number }>()
+    for (const r of selected.results) {
+      const cat = r.ruleCategory || 'uncategorized'
+      const c = cats.get(cat) || { total: 0, passed: 0, failed: 0, warnings: 0 }
+      c.total++
+      if (r.status === 'passed') c.passed++
+      else if (r.status === 'failed') c.failed++
+      else c.warnings++
+      cats.set(cat, c)
+    }
+    return Array.from(cats.entries()).map(([cat, counts]) => ({ category: cat, ...counts }))
+  }, [selected])
 
   /* ── Actions ────────────────────────────────────────────────── */
 
@@ -98,8 +153,15 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
     router.refresh()
   }
 
+  function kpiClick(filter: 'all' | 'passed' | 'failed' | 'warning') {
+    setStatusFilter(filter)
+    setScopeFilter('all')
+    setCategoryFilter('all')
+    setExpandedResult(null)
+  }
+
   return (
-    <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
+    <div style={{ padding: '28px 36px', maxWidth: '1400px' }}>
       <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Reports</span></div>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div>
@@ -113,17 +175,22 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
         }}>{running ? '⏳ Running...' : '+ Create Report'}</button>
       </div>
 
-      {/* KPI Summary Strip */}
+      {/* KPI Summary Strip — CLICKABLE */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px', marginBottom: '20px' }}>
         {[
-          { label: 'Total Runs', value: String(analytics.totalRuns), icon: '📊', color: '#2563eb', bg: '#dbeafe' },
-          { label: 'Avg Score', value: `${analytics.avgScore}%`, icon: '📈', color: scoreColor(analytics.avgScore), bg: scoreBg(analytics.avgScore) },
-          { label: 'Total Checks', value: formatNumber(analytics.totalChecks), icon: '🔍', color: '#475569', bg: '#f1f5f9' },
-          { label: 'Passed', value: formatNumber(analytics.totalPassed), icon: '✓', color: '#16a34a', bg: '#dcfce7' },
-          { label: 'Failed', value: formatNumber(analytics.totalFailed), icon: '✗', color: '#dc2626', bg: '#fee2e2' },
-          { label: 'Warnings', value: formatNumber(analytics.totalWarnings), icon: '⚠', color: '#ca8a04', bg: '#fef9c3' },
+          { label: 'Total Runs', value: String(analytics.totalRuns), icon: '📊', color: '#2563eb', bg: '#dbeafe', filter: 'all' as const },
+          { label: 'Avg Score', value: `${analytics.avgScore}%`, icon: '📈', color: scoreColor(analytics.avgScore), bg: scoreBg(analytics.avgScore), filter: 'all' as const },
+          { label: 'Total Checks', value: formatNumber(analytics.totalChecks), icon: '🔍', color: '#475569', bg: '#f1f5f9', filter: 'all' as const },
+          { label: 'Passed', value: formatNumber(analytics.totalPassed), icon: '✓', color: '#16a34a', bg: '#dcfce7', filter: 'passed' as const },
+          { label: 'Failed', value: formatNumber(analytics.totalFailed), icon: '✗', color: '#dc2626', bg: '#fee2e2', filter: 'failed' as const },
+          { label: 'Warnings', value: formatNumber(analytics.totalWarnings), icon: '⚠', color: '#ca8a04', bg: '#fef9c3', filter: 'warning' as const },
         ].map((kpi, i) => (
-          <div key={i} style={card}>
+          <div key={i} onClick={() => kpiClick(kpi.filter)} style={{
+            ...card, cursor: 'pointer', transition: 'all 0.15s',
+            border: statusFilter === kpi.filter && kpi.filter !== 'all' ? `2px solid ${kpi.color}` : '1px solid #ebe8df',
+            transform: statusFilter === kpi.filter && kpi.filter !== 'all' ? 'translateY(-2px)' : 'none',
+            boxShadow: statusFilter === kpi.filter && kpi.filter !== 'all' ? `0 4px 12px ${kpi.color}22` : 'none',
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
               <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: kpi.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0 }}>{kpi.icon}</div>
               <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 500 }}>{kpi.label}</div>
@@ -144,7 +211,7 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
               <button onClick={openCreate} style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '7px 14px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>+ Create Report</button>
             </div>
           ) : reports.map(r => (
-            <button key={r.id} onClick={() => { setSelected(r); setExpandedResult(null); setStatusFilter('all') }} style={{
+            <button key={r.id} onClick={() => { setSelected(r); setExpandedResult(null); setStatusFilter('all'); setScopeFilter('all'); setCategoryFilter('all'); setResultSearch('') }} style={{
               background: selected?.id === r.id ? '#f0f9ff' : '#fff',
               border: selected?.id === r.id ? '1px solid #93c5fd' : '1px solid #ebe8df',
               borderRadius: '10px', padding: '12px', textAlign: 'left', cursor: 'pointer',
@@ -171,7 +238,7 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '20px' }}>
               <div>
                 <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>{selected.name}</h2>
-                <div style={{ fontSize: '13px', color: '#64748b' }}>Executed {formatDateTime(selected.executedAt)}</div>
+                <div style={{ fontSize: '13px', color: '#64748b' }}>Executed {formatDateTime(selected.executedAt)} · {selected.totalChecks} checks across {new Set(selected.results.map(r => r.tableName)).size} tables</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '36px', fontWeight: 800, color: scoreColor(selected.overallScore), lineHeight: 1 }}>{selected.overallScore}%</div>
@@ -193,6 +260,39 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
                 </div>
               ))}
             </div>
+
+            {/* Category breakdown */}
+            {categoryBreakdown.length > 0 && (
+              <div style={{ marginBottom: '20px', background: '#fafaf9', borderRadius: '12px', padding: '16px 18px', border: '1px solid #ebe8df' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a', marginBottom: '12px' }}>Quality by Category</div>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(categoryBreakdown.length, 6)}, 1fr)`, gap: '10px' }}>
+                  {categoryBreakdown.map(cb => {
+                    const catColor = categoryColors[cb.category] || '#64748b'
+                    const passRate = cb.total > 0 ? Math.round((cb.passed / cb.total) * 100) : 0
+                    const isActive = categoryFilter === cb.category
+                    return (
+                      <div key={cb.category} onClick={() => setCategoryFilter(isActive ? 'all' : cb.category)} style={{
+                        background: isActive ? `${catColor}12` : '#fff', borderRadius: '10px', padding: '12px',
+                        border: isActive ? `2px solid ${catColor}` : '1px solid #ebe8df',
+                        cursor: 'pointer', transition: 'all 0.15s', textAlign: 'center',
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: 600, color: catColor, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                          {cb.category}
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: scoreColor(passRate) }}>{passRate}%</div>
+                        <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>
+                          {cb.passed}/{cb.total} passed
+                        </div>
+                        {/* Mini bar */}
+                        <div style={{ height: '3px', borderRadius: '2px', background: '#f1f5f9', marginTop: '6px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${passRate}%`, background: scoreColor(passRate), borderRadius: '2px' }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Trend chart */}
             {selected.trend && selected.trend.length > 1 && (() => {
@@ -239,63 +339,109 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
               )
             })()}
 
-            {/* Results filter tabs */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            {/* ── Filters Bar ── */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', gap: '10px', flexWrap: 'wrap' }}>
               <div style={{ fontSize: '14px', fontWeight: 700, color: '#1a1a1a' }}>Check Results</div>
-              <div style={{ display: 'flex', gap: '4px' }}>
-                {(['all', 'passed', 'failed', 'warning'] as const).map(f => (
-                  <button key={f} onClick={() => setStatusFilter(f)} style={{
-                    padding: '5px 12px', borderRadius: '6px', border: 'none', cursor: 'pointer',
-                    fontSize: '11.5px', fontWeight: 500, textTransform: 'capitalize',
-                    background: statusFilter === f ? '#1a1a1a' : '#f8fafc',
-                    color: statusFilter === f ? '#fff' : '#64748b',
-                  }}>{f} {f !== 'all' ? `(${selected.results.filter(r => r.status === f).length})` : ''}</button>
-                ))}
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* Search */}
+                <input value={resultSearch} onChange={e => setResultSearch(e.target.value)}
+                  placeholder="Search rules, tables..."
+                  style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '11.5px', width: '160px', outline: 'none', background: '#fafaf9' }} />
+                {/* Status tabs */}
+                <div style={{ display: 'flex', gap: '3px' }}>
+                  {(['all', 'passed', 'failed', 'warning'] as const).map(f => (
+                    <button key={f} onClick={() => setStatusFilter(f)} style={{
+                      padding: '5px 10px', borderRadius: '6px', border: 'none', cursor: 'pointer',
+                      fontSize: '11px', fontWeight: 500, textTransform: 'capitalize',
+                      background: statusFilter === f ? '#1a1a1a' : '#f8fafc',
+                      color: statusFilter === f ? '#fff' : '#64748b',
+                    }}>{f} {f !== 'all' ? `(${selected.results.filter(r => r.status === f).length})` : ''}</button>
+                  ))}
+                </div>
+                {/* Scope filter */}
+                <div style={{ display: 'flex', gap: '3px', borderLeft: '1px solid #e2e8f0', paddingLeft: '6px' }}>
+                  {(['all', 'generic', 'object-specific'] as const).map(s => (
+                    <button key={s} onClick={() => setScopeFilter(s)} style={{
+                      padding: '5px 10px', borderRadius: '6px', border: 'none', cursor: 'pointer',
+                      fontSize: '11px', fontWeight: 500,
+                      background: scopeFilter === s ? '#E8541A' : '#f8fafc',
+                      color: scopeFilter === s ? '#fff' : '#64748b',
+                    }}>{s === 'all' ? 'All Scopes' : s === 'generic' ? '🔧 Generic' : '🎯 Object-Specific'}</button>
+                  ))}
+                </div>
               </div>
             </div>
 
             {/* Results table */}
             <div style={{ borderRadius: '10px', border: '1px solid #ebe8df', overflow: 'hidden' }}>
               {/* Header */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px 70px 80px 70px 80px 70px', gap: '8px', padding: '8px 14px', background: '#fafaf9', borderBottom: '1px solid #ebe8df' }}>
-                {['Rule', 'Table', 'Score', 'Records', 'Failed', 'Status', 'Duration'].map(h => (
-                  <div key={h} style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 100px 80px 70px 60px 70px 70px 80px', gap: '6px', padding: '8px 14px', background: '#fafaf9', borderBottom: '1px solid #ebe8df' }}>
+                {['Rule', 'Type', 'Table', 'Category', 'Severity', 'Score', 'Checked', 'Failed', 'Status'].map(h => (
+                  <div key={h} style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</div>
                 ))}
               </div>
 
               {/* Rows */}
               {filteredResults.map((r, i) => {
                 const s = statusConfig[r.status]
+                const sev = severityConfig[r.severity || 'medium']
                 const isExpanded = expandedResult === i
+                const scopeBadge = r.scope === 'object-specific'
+                  ? { bg: '#faf5ff', color: '#7c3aed', label: 'Object' }
+                  : { bg: '#f0f9ff', color: '#0369a1', label: 'Generic' }
                 return (
                   <div key={i}>
                     <div onClick={() => setExpandedResult(isExpanded ? null : i)} style={{
-                      display: 'grid', gridTemplateColumns: '1fr 120px 70px 80px 70px 80px 70px', gap: '8px',
+                      display: 'grid', gridTemplateColumns: '1fr 100px 100px 80px 70px 60px 70px 70px 80px', gap: '6px',
                       padding: '10px 14px', borderBottom: '1px solid #f8f6f0', cursor: 'pointer',
                       background: isExpanded ? '#fafaf9' : r.status === 'failed' ? '#fef2f2' : '#fff',
-                      alignItems: 'center',
-                    }}>
+                      alignItems: 'center', transition: 'background 0.15s',
+                    }}
+                      onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = '#f8fafc' }}
+                      onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = r.status === 'failed' ? '#fef2f2' : '#fff' }}
+                    >
+                      {/* Rule name + scope badge */}
                       <div>
-                        <div style={{ fontSize: '12.5px', fontWeight: 500, color: '#0f172a' }}>{r.ruleName}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '12.5px', fontWeight: 500, color: '#0f172a' }}>{r.ruleName}</span>
+                          <span style={{ background: scopeBadge.bg, color: scopeBadge.color, padding: '1px 5px', borderRadius: '4px', fontSize: '9px', fontWeight: 600 }}>{scopeBadge.label}</span>
+                        </div>
                       </div>
+                      {/* Rule Type */}
                       <div>
-                        <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '10.5px', color: '#475569' }}>
+                        <span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', color: '#475569', fontWeight: 500 }}>
+                          {ruleTypeLabel(r.ruleType)}
+                        </span>
+                      </div>
+                      {/* Table.Column */}
+                      <div>
+                        <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', color: '#475569' }}>
                           {r.tableName}{r.columnName ? `.${r.columnName}` : ''}
                         </code>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <div style={{ width: '32px', height: '4px', borderRadius: '2px', background: '#f1f5f9', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${r.score}%`, background: scoreColor(r.score) }} />
-                        </div>
+                      {/* Category */}
+                      <div>
+                        <span style={{
+                          background: `${categoryColors[r.ruleCategory || ''] || '#64748b'}18`,
+                          color: categoryColors[r.ruleCategory || ''] || '#64748b',
+                          padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 500, textTransform: 'capitalize',
+                        }}>{r.ruleCategory || '—'}</span>
+                      </div>
+                      {/* Severity */}
+                      <div>
+                        <span style={{ background: sev.bg, color: sev.color, padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 600 }}>{sev.label}</span>
+                      </div>
+                      {/* Score */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                         <span style={{ fontWeight: 600, fontSize: '12px', color: scoreColor(r.score) }}>{r.score}%</span>
                       </div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>{formatNumber(r.recordsChecked)}</div>
-                      <div style={{ fontSize: '12px', color: r.recordsFailed > 0 ? '#ef4444' : '#16a34a', fontWeight: r.recordsFailed > 0 ? 600 : 400 }}>{formatNumber(r.recordsFailed)}</div>
-                      <div>
-                        <span style={{ background: s.bg, color: s.color, padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600 }}>{s.label}</span>
-                      </div>
+                      {/* Records Checked */}
+                      <div style={{ fontSize: '11px', color: '#64748b' }}>{formatNumber(r.recordsChecked)}</div>
+                      {/* Records Failed */}
+                      <div style={{ fontSize: '11px', color: r.recordsFailed > 0 ? '#ef4444' : '#16a34a', fontWeight: r.recordsFailed > 0 ? 600 : 400 }}>{formatNumber(r.recordsFailed)}</div>
+                      {/* Status */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>{(r.duration / 1000).toFixed(1)}s</span>
+                        <span style={{ background: s.bg, color: s.color, padding: '3px 8px', borderRadius: '20px', fontSize: '10px', fontWeight: 600 }}>{s.label}</span>
                         <span style={{ fontSize: '10px', color: '#94a3b8', transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
                       </div>
                     </div>
@@ -303,6 +449,30 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
                     {/* Expanded detail */}
                     {isExpanded && (
                       <div style={{ padding: '14px 18px', background: '#fafaf9', borderBottom: '1px solid #ebe8df' }}>
+                        {/* Detail header */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px', padding: '10px 14px', background: '#fff', borderRadius: '8px', border: '1px solid #ebe8df' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Rule Details</div>
+                            <div style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a', marginTop: '2px' }}>{r.ruleName}</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '0 12px', borderLeft: '1px solid #ebe8df' }}>
+                            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Type</div>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>{ruleTypeLabel(r.ruleType)}</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '0 12px', borderLeft: '1px solid #ebe8df' }}>
+                            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Category</div>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: categoryColors[r.ruleCategory || ''] || '#475569', textTransform: 'capitalize' }}>{r.ruleCategory || '—'}</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '0 12px', borderLeft: '1px solid #ebe8df' }}>
+                            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Scope</div>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: r.scope === 'object-specific' ? '#7c3aed' : '#0369a1' }}>{r.scope === 'object-specific' ? '🎯 Object-Specific' : '🔧 Generic'}</div>
+                          </div>
+                          <div style={{ textAlign: 'center', padding: '0 12px', borderLeft: '1px solid #ebe8df' }}>
+                            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Target</div>
+                            <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>{r.connectionName}</div>
+                          </div>
+                        </div>
+
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '14px' }}>
                           {[
                             { label: 'Records Checked', value: formatNumber(r.recordsChecked) },
@@ -328,7 +498,7 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
                           </pre>
                         </div>
 
-                        {/* AI Analysis placeholder */}
+                        {/* AI Analysis */}
                         {r.status === 'failed' && (
                           <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '12px 14px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
@@ -336,7 +506,7 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
                               <span style={{ fontSize: '12px', fontWeight: 600, color: '#0369a1' }}>AI Analysis</span>
                             </div>
                             <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5 }}>
-                              {r.recordsFailed} records failed the {r.ruleName} check on {r.tableName}.{r.columnName ? ` Column ${r.columnName} contains invalid or null values.` : ''} This may indicate an ETL issue in the upstream pipeline. Consider reviewing recent data loads.
+                              {r.recordsFailed} records failed the <strong>{ruleTypeLabel(r.ruleType)}</strong> check ({r.ruleCategory}) on <strong>{r.tableName}</strong>.{r.columnName ? ` Column ${r.columnName} contains invalid or null values.` : ''} Severity: <strong>{r.severity || 'medium'}</strong>. This may indicate an ETL issue in the upstream pipeline.
                             </div>
                           </div>
                         )}
@@ -354,7 +524,7 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
 
               {filteredResults.length === 0 && (
                 <div style={{ padding: '30px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
-                  No results match the selected filter
+                  No results match the selected filters
                 </div>
               )}
 

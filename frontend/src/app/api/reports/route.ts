@@ -1,7 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/store'
 import { generateId } from '@/lib/utils'
-import { Report, CheckResult } from '@/lib/types'
+import { Report, CheckResult, RuleType } from '@/lib/types'
+
+/* Rule scope classification */
+const GENERIC_RULE_TYPES: RuleType[] = [
+  'not_null', 'unique', 'range', 'regex', 'freshness', 'row_count',
+  'null_check', 'uniqueness_check', 'duplicate_check', 'accepted_values_check',
+  'range_check', 'freshness_check', 'volume_check', 'regex_check',
+]
+function ruleScope(type: RuleType): 'generic' | 'object-specific' {
+  return GENERIC_RULE_TYPES.includes(type) ? 'generic' : 'object-specific'
+}
+
+/* Human-readable rule type label */
+function ruleTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    not_null: 'Not Null', unique: 'Unique', range: 'Range', regex: 'Regex',
+    custom_sql: 'Custom SQL', freshness: 'Freshness', row_count: 'Row Count',
+    referential: 'Referential', null_check: 'Null Check', uniqueness_check: 'Uniqueness',
+    duplicate_check: 'Duplicate', accepted_values_check: 'Accepted Values',
+    range_check: 'Range', freshness_check: 'Freshness', volume_check: 'Volume',
+    schema_drift_check: 'Schema Drift', referential_integrity_check: 'Referential Integrity',
+    regex_check: 'Regex', business_rule_check: 'Business Rule', custom_sql_check: 'Custom SQL',
+    semantic_consistency_check: 'Semantic Consistency', referential_sanity_check: 'Referential Sanity',
+    business_metric_check: 'Business Metric', distribution_consistency_check: 'Distribution',
+    llm_semantic_check: 'LLM Semantic',
+  }
+  return map[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
 
 export async function GET() {
   const reports = store.reports.getAll()
@@ -11,14 +38,13 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const body = await req.json()
 
-  // Simulate running checks and generating report
   const rules = store.rules.getAll()
   const connections = store.connections.getAll()
   const enabledRules = rules.filter(r => r.enabled)
 
   const results: CheckResult[] = enabledRules.map(rule => {
     const conn = connections.find(c => c.id === rule.connectionId)
-    const score = Math.random() * 20 + 80 // 80-100
+    const score = Math.random() * 20 + 80
     const recordsChecked = Math.floor(Math.random() * 100000) + 10000
     const recordsFailed = score < 95 ? Math.floor(recordsChecked * (1 - score / 100)) : 0
     const status = score >= 98 ? 'passed' : score >= 90 ? 'warning' : 'failed'
@@ -35,7 +61,11 @@ export async function POST(req: NextRequest) {
       recordsFailed,
       executedAt: new Date().toISOString(),
       duration: Math.floor(Math.random() * 3000) + 500,
-      details: `Checked ${recordsChecked.toLocaleString()} records`
+      details: `Checked ${recordsChecked.toLocaleString()} records · Rule type: ${ruleTypeLabel(rule.type)} · Category: ${rule.category}`,
+      ruleType: rule.type,
+      ruleCategory: rule.category,
+      severity: rule.severity,
+      scope: ruleScope(rule.type),
     }
   })
 

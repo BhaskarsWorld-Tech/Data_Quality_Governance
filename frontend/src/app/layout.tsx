@@ -11,9 +11,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ display: 'flex', minHeight: '100vh', background: '#fdfcf7' }}>
+      <body style={{ minHeight: '100vh', background: '#fdfcf7' }}>
         <Sidebar />
-        <main style={{ flex: 1, marginLeft: '240px', minHeight: '100vh', overflow: 'auto' }}>
+        <main style={{
+          marginLeft: '72px',   /* icon rail width */
+          marginTop: '56px',    /* top bar height */
+          minHeight: 'calc(100vh - 56px)',
+          overflow: 'auto',
+        }}>
           {children}
         </main>
         <AgentChat />

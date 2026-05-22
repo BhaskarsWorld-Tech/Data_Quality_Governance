@@ -331,5 +331,129 @@
         "score": 92
       }
     ]
+  },
+  {
+    "id": "report_1779461526753_dmh47qj3u",
+    "name": "test",
+    "overallScore": 93,
+    "totalChecks": 6,
+    "passed": 1,
+    "failed": 2,
+    "warnings": 3,
+    "executedAt": "2026-05-22T14:52:06.753Z",
+    "results": [
+      {
+        "ruleId": "rule_1",
+        "ruleName": "Customer Email Not Null",
+        "connectionName": "Unknown",
+        "tableName": "customers",
+        "columnName": "email",
+        "status": "failed",
+        "score": 88.8,
+        "recordsChecked": 57566,
+        "recordsFailed": 6457,
+        "executedAt": "2026-05-22T14:52:06.747Z",
+        "duration": 1132,
+        "details": "Checked 57,566 records"
+      },
+      {
+        "ruleId": "rule_2",
+        "ruleName": "Customer ID Uniqueness",
+        "connectionName": "Unknown",
+        "tableName": "customers",
+        "columnName": "customer_id",
+        "status": "warning",
+        "score": 95.3,
+        "recordsChecked": 28836,
+        "recordsFailed": 0,
+        "executedAt": "2026-05-22T14:52:06.748Z",
+        "duration": 3157,
+        "details": "Checked 28,836 records"
+      },
+      {
+        "ruleId": "rule_3",
+        "ruleName": "Order Amount Range",
+        "connectionName": "Unknown",
+        "tableName": "orders",
+        "columnName": "amount",
+        "status": "failed",
+        "score": 85,
+        "recordsChecked": 96037,
+        "recordsFailed": 14397,
+        "executedAt": "2026-05-22T14:52:06.748Z",
+        "duration": 1049,
+        "details": "Checked 96,037 records"
+      },
+      {
+        "ruleId": "rule_4",
+        "ruleName": "Email Format Validation",
+        "connectionName": "Unknown",
+        "tableName": "customers",
+        "columnName": "email",
+        "status": "passed",
+        "score": 98.2,
+        "recordsChecked": 77986,
+        "recordsFailed": 0,
+        "executedAt": "2026-05-22T14:52:06.748Z",
+        "duration": 1996,
+        "details": "Checked 77,986 records"
+      },
+      {
+        "ruleId": "rule_5",
+        "ruleName": "Sales Data Freshness",
+        "connectionName": "Unknown",
+        "tableName": "fact_sales",
+        "status": "warning",
+        "score": 96.2,
+        "recordsChecked": 58634,
+        "recordsFailed": 0,
+        "executedAt": "2026-05-22T14:52:06.748Z",
+        "duration": 1731,
+        "details": "Checked 58,634 records"
+      },
+      {
+        "ruleId": "rule_6",
+        "ruleName": "Minimum Row Count",
+        "connectionName": "Unknown",
+        "tableName": "orders",
+        "status": "warning",
+        "score": 92.6,
+        "recordsChecked": 97966,
+        "recordsFailed": 7245,
+        "executedAt": "2026-05-22T14:52:06.748Z",
+        "duration": 2951,
+        "details": "Checked 97,966 records"
+      }
+    ],
+    "trend": [
+      {
+        "date": "May 16",
+        "score": 94
+      },
+      {
+        "date": "May 17",
+        "score": 84
+      },
+      {
+        "date": "May 18",
+        "score": 91
+      },
+      {
+        "date": "May 19",
+        "score": 94
+      },
+      {
+        "date": "May 20",
+        "score": 94
+      },
+      {
+        "date": "May 21",
+        "score": 91
+      },
+      {
+        "date": "May 22",
+        "score": 93
+      }
+    ]
   }
 ]

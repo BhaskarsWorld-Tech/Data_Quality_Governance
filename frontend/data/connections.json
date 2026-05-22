@@ -1,6 +1,6 @@
 [
   {
-    "name": "SF_CODEX",
+    "name": "SF_DATAGUARD",
     "type": "snowflake",
     "account": "FPUYJEJ-ISB99901.snowflakecomputing.com",
     "warehouse": "COMPUTE_WH",

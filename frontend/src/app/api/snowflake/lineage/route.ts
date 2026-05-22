@@ -56,7 +56,7 @@ export async function GET() {
          WHERE c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME) AS COLUMN_COUNT
       FROM INFORMATION_SCHEMA.TABLES t
       WHERE t.TABLE_SCHEMA NOT IN ('INFORMATION_SCHEMA')
-        AND t.TABLE_TYPE IN ('BASE TABLE', 'VIEW')
+        AND t.TABLE_TYPE IN ('BASE TABLE', 'VIEW', 'MATERIALIZED VIEW', 'EXTERNAL TABLE')
       ORDER BY t.TABLE_SCHEMA, t.TABLE_TYPE DESC, t.TABLE_NAME
     `)
 
@@ -84,8 +84,10 @@ export async function GET() {
 
         for (const view of views) {
           try {
+            const viewType = String(view.TABLE_TYPE ?? '').toUpperCase().includes('MATERIALIZED')
+              ? 'MATERIALIZED VIEW' : 'VIEW'
             const ddlRows = await querySnowflake(
-              `SELECT GET_DDL('VIEW', ?) AS DDL`,
+              `SELECT GET_DDL('${viewType}', ?) AS DDL`,
               [`${view.TABLE_SCHEMA}.${view.TABLE_NAME}`]
             )
             const ddl = String(ddlRows[0]?.DDL ?? '')
@@ -117,27 +119,31 @@ export async function GET() {
       const tableName = String(t.TABLE_NAME ?? '')
       const schemaName = String(t.TABLE_SCHEMA ?? '')
       const tableType = String(t.TABLE_TYPE ?? '')
-      const isView = tableType.toUpperCase().includes('VIEW')
+      const upperType = tableType.toUpperCase()
+      const isView = upperType.includes('VIEW')
+      const isMView = upperType.includes('MATERIALIZED')
 
       // Classify node type based on naming conventions and table type
       let nodeType: LineageNode['type'] = 'warehouse'
       const lower = tableName.toLowerCase()
       if (lower.startsWith('raw_') || lower.startsWith('stg_') || schemaName.toUpperCase() === 'RAW') {
         nodeType = 'raw'
-      } else if (isView || lower.startsWith('v_') || lower.startsWith('vw_')) {
-        nodeType = 'transform'
+      } else if (isView) {
+        nodeType = 'output'  // views and mviews go to output layer
+      } else if (lower.startsWith('v_') || lower.startsWith('vw_')) {
+        nodeType = 'output'
       } else if (lower.startsWith('dim_') || lower.startsWith('fact_') || lower.startsWith('agg_')) {
         nodeType = 'warehouse'
       } else if (lower.startsWith('rpt_') || lower.startsWith('report_')) {
         nodeType = 'output'
       }
 
-      const icon = isView ? '👁' : '📋'
+      const icon = isMView ? '📐' : isView ? '👁' : '📋'
 
       return {
         id: `${schemaName}.${tableName}`,
         label: tableName,
-        sub: `${schemaName} · ${isView ? 'View' : 'Table'}`,
+        sub: `${schemaName} · ${isMView ? 'Materialized View' : isView ? 'View' : 'Table'}`,
         type: nodeType,
         icon,
         schema: schemaName,
