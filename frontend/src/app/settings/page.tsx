@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { Connection } from '@/lib/types'
+import { loadConnections } from '@/lib/seedData'
 
 const connIcons: Record<string, string> = {
   snowflake: '❄️', postgresql: '🐘', mysql: '🐬', bigquery: '📊',
@@ -39,13 +40,14 @@ export default function SettingsPage() {
   const [justCreated, setJustCreated] = useState<{ name: string; key: string } | null>(null)
   const [copied, setCopied] = useState(false)
 
-  // Load connections
+  // Load connections when tab switches to connections
   useEffect(() => {
     if (tab === 'connections') {
       setConnsLoading(true)
-      fetch('/api/connections').then(r => r.json()).then(data => {
-        setConnections(Array.isArray(data) ? data : (data.connections ?? []))
-      }).catch(() => {}).finally(() => setConnsLoading(false))
+      loadConnections().then(conns => {
+        setConnections(conns)
+        setConnsLoading(false)
+      })
     }
   }, [tab])
 

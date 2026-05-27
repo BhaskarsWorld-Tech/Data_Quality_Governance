@@ -1,5 +1,5 @@
 'use client'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Report, CheckResult } from '@/lib/types'
 import { formatDateTime, formatNumber, categoryColors } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
@@ -70,6 +70,15 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
     initialReports.sort((a, b) => new Date(b.executedAt).getTime() - new Date(a.executedAt).getTime())
   )
   const [selected, setSelected] = useState<Report | null>(reports[0] || null)
+
+  // Sync when parent provides new data (async load)
+  useEffect(() => {
+    if (initialReports.length > 0) {
+      const sorted = [...initialReports].sort((a, b) => new Date(b.executedAt).getTime() - new Date(a.executedAt).getTime())
+      setReports(sorted)
+      setSelected(sorted[0] || null)
+    }
+  }, [initialReports])
   const [running, setRunning] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [expandedResult, setExpandedResult] = useState<number | null>(null)

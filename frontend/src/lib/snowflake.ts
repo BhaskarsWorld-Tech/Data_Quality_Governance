@@ -1,18 +1,41 @@
 /**
  * Snowflake query helper — server-side only (Node.js runtime).
  * Uses snowflake-sdk with username/password auth.
+ * On Cloudflare Workers (edge), all functions throw with a clear message.
  */
-import snowflake from 'snowflake-sdk'
 import { store } from './store'
-
-// Silence the SDK's verbose logging in production
-snowflake.configure({ logLevel: 'ERROR' })
 
 type Row = Record<string, unknown>
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _sdk: any = null
+let _sdkLoaded = false
+
+/** Lazily load snowflake-sdk — only resolves in Node.js, fails gracefully on edge */
+async function getSdk() {
+  if (_sdkLoaded) return _sdk
+  _sdkLoaded = true
+  try {
+    // Dynamic require keeps the native module out of the Cloudflare/esbuild bundle
+    _sdk = require(/* webpackIgnore: true */ 'snowflake-sdk')
+    _sdk.configure({ logLevel: 'ERROR' })
+  } catch {
+    _sdk = null
+  }
+  return _sdk
+}
+
 /** Execute a SQL statement against the saved active Snowflake connection. */
 export async function querySnowflake(sql: string, binds?: unknown[]): Promise<Row[]> {
-  // Pick the first active snowflake connection
+  const sdk = await getSdk()
+  if (!sdk) {
+    throw new Error(
+      'Snowflake SDK requires Node.js runtime. ' +
+      'Live Snowflake queries are not available on edge deployments. ' +
+      'The app will operate in demo mode with sample data.'
+    )
+  }
+
   const all = store.connections.getAll()
   const conn = all.find(c => c.type === 'snowflake' && c.status === 'active')
     ?? all.find(c => c.type === 'snowflake')
@@ -21,7 +44,7 @@ export async function querySnowflake(sql: string, binds?: unknown[]): Promise<Ro
 
   const account = (conn.account as string ?? '').replace(/\.snowflakecomputing\.com$/i, '')
 
-  const sfConn = snowflake.createConnection({
+  const sfConn = sdk.createConnection({
     account,
     username:  conn.username ?? '',
     password:  conn.password as string ?? '',
@@ -33,14 +56,14 @@ export async function querySnowflake(sql: string, binds?: unknown[]): Promise<Ro
   })
 
   return new Promise((resolve, reject) => {
-    sfConn.connect((err, c) => {
+    sfConn.connect((err: Error | undefined, c: { execute: Function }) => {
       if (err) return reject(new Error(`Snowflake auth failed: ${err.message}`))
 
       c.execute({
         sqlText: sql,
-        binds:   binds as snowflake.Binds,
-        complete: (err2, _stmt, rows) => {
-          sfConn.destroy(() => {})
+        binds:   binds as unknown[],
+        complete: (err2: Error | undefined, _stmt: unknown, rows: Row[]) => {
+          if (typeof sfConn.destroy === 'function') sfConn.destroy(() => {})
           if (err2) return reject(new Error(`Query error: ${err2.message}`))
           resolve((rows ?? []) as Row[])
         }
@@ -90,7 +113,6 @@ export async function getColumnMetadata(tableName: string): Promise<Row[]> {
 
 /** Preview first N rows of a table. */
 export async function previewTable(tableName: string, limit = 50): Promise<Row[]> {
-  // Snowflake identifiers are case-insensitive; quote to be safe
   return querySnowflake(`SELECT * FROM IDENTIFIER(?) LIMIT ?`, [tableName, limit])
 }
 

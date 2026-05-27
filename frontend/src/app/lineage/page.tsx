@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 
 /* ─── Types ─── */
 interface LineageNode {
@@ -15,6 +15,24 @@ interface ConnectionInfo { name: string; database: string; schema: string; wareh
 interface LineageMeta { edgeMethods?: { fk: number; ddl: number; heuristic: number }; totalTables?: number; totalEdges?: number }
 interface LineageData { nodes: LineageNode[]; edges: LineageEdge[]; connection: ConnectionInfo; meta?: LineageMeta }
 interface ColumnInfo { COLUMN_NAME: string; DATA_TYPE: string; IS_NULLABLE: string; ORDINAL_POSITION: number; CHARACTER_MAXIMUM_LENGTH?: number; NUMERIC_PRECISION?: number; COLUMN_DEFAULT?: string; COMMENT?: string }
+
+/* ─── Mock column data for all tables ─── */
+const MOCK_TABLE_COLUMNS: Record<string, string[]> = {
+  CARRIERS: ['CARRIER_ID', 'CARRIER_NAME', 'CONTACT_PERSON', 'PHONE', 'EMAIL', 'TRACKING_URL', 'CREATED_AT', 'UPDATED_AT'],
+  CUSTOMERS: ['CUSTOMER_ID', 'FIRST_NAME', 'LAST_NAME', 'EMAIL', 'PHONE', 'ADDRESS', 'CITY', 'STATE', 'COUNTRY', 'POSTAL_CODE', 'CREDIT_LIMIT', 'CUSTOMER_SEGMENT', 'CREATED_AT', 'UPDATED_AT'],
+  PRODUCTS: ['PRODUCT_ID', 'PRODUCT_NAME', 'CATEGORY_ID', 'UNIT_PRICE', 'UNIT_COST', 'WEIGHT', 'DESCRIPTION', 'SKU', 'CREATED_AT', 'UPDATED_AT'],
+  PRODUCT_CATEGORIES: ['CATEGORY_ID', 'CATEGORY_NAME', 'PARENT_CATEGORY_ID', 'DESCRIPTION', 'CREATED_AT'],
+  SUPPLIERS: ['SUPPLIER_ID', 'SUPPLIER_NAME', 'CONTACT_PERSON', 'EMAIL', 'PHONE', 'ADDRESS', 'CITY', 'COUNTRY', 'RATING', 'CREATED_AT'],
+  WAREHOUSES: ['WAREHOUSE_ID', 'WAREHOUSE_NAME', 'LOCATION', 'CITY', 'COUNTRY', 'CAPACITY', 'CREATED_AT', 'UPDATED_AT'],
+  FINANCE_TRANSACTIONS: ['TRANSACTION_ID', 'ORDER_ID', 'TRANSACTION_TYPE', 'AMOUNT', 'CURRENCY', 'PAYMENT_METHOD', 'STATUS', 'TRANSACTION_DATE', 'REFERENCE_NUMBER', 'DESCRIPTION', 'CREATED_AT', 'UPDATED_AT'],
+  INVENTORY: ['INVENTORY_ID', 'PRODUCT_ID', 'WAREHOUSE_ID', 'QUANTITY_ON_HAND', 'REORDER_LEVEL', 'LAST_RESTOCK_DATE', 'CREATED_AT', 'UPDATED_AT'],
+  PURCHASE_ORDERS: ['PO_ID', 'SUPPLIER_ID', 'ORDER_DATE', 'EXPECTED_DELIVERY', 'STATUS', 'TOTAL_AMOUNT', 'CURRENCY', 'NOTES', 'CREATED_AT', 'UPDATED_AT'],
+  PURCHASE_ORDER_ITEMS: ['PO_ITEM_ID', 'PO_ID', 'PRODUCT_ID', 'QUANTITY', 'UNIT_PRICE', 'TOTAL_PRICE', 'CREATED_AT', 'UPDATED_AT'],
+  RETURNS: ['RETURN_ID', 'ORDER_ID', 'CUSTOMER_ID', 'PRODUCT_ID', 'RETURN_REASON', 'RETURN_DATE', 'REFUND_AMOUNT', 'STATUS', 'CREATED_AT'],
+  SALES_ORDERS: ['ORDER_ID', 'ORDER_NUMBER', 'CUSTOMER_ID', 'WAREHOUSE_ID', 'ORDER_DATE', 'REQUIRED_DATE', 'SHIPPED_DATE', 'STATUS', 'SHIPPING_METHOD', 'TOTAL_AMOUNT', 'DISCOUNT_AMOUNT', 'TAX_AMOUNT', 'NET_AMOUNT', 'CREATED_AT', 'UPDATED_AT'],
+  CUSTOMER_CREDIT_VIEW: ['CUSTOMER_ID', 'FULL_NAME', 'CREDIT_LIMIT', 'TOTAL_ORDERS', 'TOTAL_SPENT'],
+  USA_CUSTOMERS_VIEW: ['CUSTOMER_ID', 'FIRST_NAME', 'LAST_NAME', 'STATE', 'CITY', 'CREDIT_LIMIT'],
+}
 
 /* ─── Static fallback ─── */
 const STATIC_NODES: LineageNode[] = [
@@ -191,6 +209,8 @@ export default function LineagePage() {
   const [columnsLoading, setColumnsLoading] = useState(false)
   const [columnSearch, setColumnSearch] = useState('')
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  const [selectedColumn, setSelectedColumn] = useState<string | null>(null)
+  const [allTableColumns, setAllTableColumns] = useState<Map<string, string[]>>(new Map())
   const inputRef = useRef<HTMLInputElement>(null)
 
   const fetchLineage = useCallback(async (silent = false) => {
@@ -226,6 +246,35 @@ export default function LineagePage() {
     return () => clearInterval(timer)
   }, [fetchLineage])
 
+  // Load all table columns for column-level lineage
+  useEffect(() => {
+    if (!data) return
+    const loadAllCols = async () => {
+      const map = new Map<string, string[]>()
+      for (const node of data.nodes) {
+        if (node.type === 'source') continue
+        try {
+          const res = await fetch(`/api/snowflake/columns?table=${encodeURIComponent(node.label)}`)
+          const json = await res.json()
+          if (json.columns && json.columns.length > 0) {
+            map.set(node.id, json.columns.map((c: ColumnInfo) => c.COLUMN_NAME))
+          } else {
+            const mock = MOCK_TABLE_COLUMNS[node.label]
+            if (mock) map.set(node.id, mock)
+          }
+        } catch {
+          const mock = MOCK_TABLE_COLUMNS[node.label]
+          if (mock) map.set(node.id, mock)
+        }
+      }
+      setAllTableColumns(map)
+    }
+    loadAllCols()
+  }, [data])
+
+  // Clear selected column when table selection changes
+  useEffect(() => { setSelectedColumn(null) }, [selected])
+
   // Fetch columns when a node is selected
   useEffect(() => {
     if (!selected) { setColumnData(null); return }
@@ -237,22 +286,7 @@ export default function LineagePage() {
       .then(d => setColumnData(d.columns ?? []))
       .catch(() => {
         if (!isLive) {
-          const cols: string[] = {
-            CARRIERS: ['CARRIER_ID', 'CARRIER_NAME', 'CONTACT_PERSON', 'PHONE', 'EMAIL', 'TRACKING_URL', 'CREATED_AT', 'UPDATED_AT'],
-            CUSTOMERS: ['CUSTOMER_ID', 'FIRST_NAME', 'LAST_NAME', 'EMAIL', 'PHONE', 'ADDRESS', 'CITY', 'STATE', 'COUNTRY', 'POSTAL_CODE', 'CREDIT_LIMIT', 'CUSTOMER_SEGMENT', 'CREATED_AT', 'UPDATED_AT'],
-            PRODUCTS: ['PRODUCT_ID', 'PRODUCT_NAME', 'CATEGORY_ID', 'UNIT_PRICE', 'UNIT_COST', 'WEIGHT', 'DESCRIPTION', 'SKU', 'CREATED_AT', 'UPDATED_AT'],
-            PRODUCT_CATEGORIES: ['CATEGORY_ID', 'CATEGORY_NAME', 'PARENT_CATEGORY_ID', 'DESCRIPTION', 'CREATED_AT'],
-            SUPPLIERS: ['SUPPLIER_ID', 'SUPPLIER_NAME', 'CONTACT_PERSON', 'EMAIL', 'PHONE', 'ADDRESS', 'CITY', 'COUNTRY', 'RATING', 'CREATED_AT'],
-            WAREHOUSES: ['WAREHOUSE_ID', 'WAREHOUSE_NAME', 'LOCATION', 'CITY', 'COUNTRY', 'CAPACITY', 'CREATED_AT', 'UPDATED_AT'],
-            FINANCE_TRANSACTIONS: ['TRANSACTION_ID', 'ORDER_ID', 'TRANSACTION_TYPE', 'AMOUNT', 'CURRENCY', 'PAYMENT_METHOD', 'STATUS', 'TRANSACTION_DATE', 'REFERENCE_NUMBER', 'DESCRIPTION', 'CREATED_AT', 'UPDATED_AT'],
-            INVENTORY: ['INVENTORY_ID', 'PRODUCT_ID', 'WAREHOUSE_ID', 'QUANTITY_ON_HAND', 'REORDER_LEVEL', 'LAST_RESTOCK_DATE', 'CREATED_AT', 'UPDATED_AT'],
-            PURCHASE_ORDERS: ['PO_ID', 'SUPPLIER_ID', 'ORDER_DATE', 'EXPECTED_DELIVERY', 'STATUS', 'TOTAL_AMOUNT', 'CURRENCY', 'NOTES', 'CREATED_AT', 'UPDATED_AT'],
-            PURCHASE_ORDER_ITEMS: ['PO_ITEM_ID', 'PO_ID', 'PRODUCT_ID', 'QUANTITY', 'UNIT_PRICE', 'TOTAL_PRICE', 'CREATED_AT', 'UPDATED_AT'],
-            RETURNS: ['RETURN_ID', 'ORDER_ID', 'CUSTOMER_ID', 'PRODUCT_ID', 'RETURN_REASON', 'RETURN_DATE', 'REFUND_AMOUNT', 'STATUS', 'CREATED_AT'],
-            SALES_ORDERS: ['ORDER_ID', 'ORDER_NUMBER', 'CUSTOMER_ID', 'WAREHOUSE_ID', 'ORDER_DATE', 'REQUIRED_DATE', 'SHIPPED_DATE', 'STATUS', 'SHIPPING_METHOD', 'TOTAL_AMOUNT', 'DISCOUNT_AMOUNT', 'TAX_AMOUNT', 'NET_AMOUNT', 'CREATED_AT', 'UPDATED_AT'],
-            CUSTOMER_CREDIT_VIEW: ['CUSTOMER_ID', 'FULL_NAME', 'CREDIT_LIMIT', 'TOTAL_ORDERS', 'TOTAL_SPENT'],
-            USA_CUSTOMERS_VIEW: ['CUSTOMER_ID', 'FIRST_NAME', 'LAST_NAME', 'STATE', 'CITY', 'CREDIT_LIMIT'],
-          }[node.label] || Array.from({ length: node.columnCount || 6 }, (_, i) => `COL_${i + 1}`)
+          const cols: string[] = MOCK_TABLE_COLUMNS[node.label] || Array.from({ length: node.columnCount || 6 }, (_, i) => `COL_${i + 1}`)
 
           const mockCols: ColumnInfo[] = cols.map((name, i) => ({
             COLUMN_NAME: name,
@@ -266,6 +300,62 @@ export default function LineagePage() {
       .finally(() => setColumnsLoading(false))
   }, [selected, isLive, data])
 
+  // ─── Derived layout (always computed, hooks-safe) ───
+  const laidOut = useMemo(() => data ? layoutNodes(data.nodes, data.edges) : [], [data])
+  const nodeMap = useMemo(() => new Map(laidOut.map(n => [n.id, n])), [laidOut])
+
+  // ─── Column-level lineage computation ───
+  const columnLineage = useMemo(() => {
+    const empty = { tables: new Set<string>(), edges: [] as LineageEdge[], path: [] as { tableId: string; label: string; role: string }[] }
+    if (!selectedColumn || !data) return empty
+
+    // Find all tables that have this column
+    const tablesWithColumn = new Set<string>()
+    for (const [tableId, cols] of allTableColumns) {
+      if (cols.includes(selectedColumn)) tablesWithColumn.add(tableId)
+    }
+
+    // Filter edges: only edges where BOTH endpoints have this column
+    const colEdges = data.edges.filter(e =>
+      tablesWithColumn.has(e.from) && tablesWithColumn.has(e.to)
+    )
+
+    // Build ordered path following the column through the graph
+    const path: { tableId: string; label: string; role: string }[] = []
+    const pathVisited = new Set<string>()
+
+    // Find root tables for this column (tables that have it but no incoming column-edge)
+    const hasIncoming = new Set(colEdges.map(e => e.to))
+    const roots = [...tablesWithColumn].filter(t => !hasIncoming.has(t))
+
+    // BFS from roots
+    const queue = [...roots]
+    for (const r of queue) {
+      if (pathVisited.has(r)) continue
+      pathVisited.add(r)
+      const node = nodeMap.get(r)
+      if (node) {
+        const isRoot = roots.includes(r)
+        const hasOut = colEdges.some(e => e.from === r)
+        const role = isRoot ? 'origin' : hasOut ? 'passthrough' : 'consumer'
+        path.push({ tableId: r, label: node.label, role })
+      }
+      // Add downstream neighbors
+      for (const e of colEdges) {
+        if (e.from === r && !pathVisited.has(e.to)) queue.push(e.to)
+      }
+    }
+    // Also add any isolated tables with the column
+    for (const t of tablesWithColumn) {
+      if (!pathVisited.has(t)) {
+        const node = nodeMap.get(t)
+        if (node) path.push({ tableId: t, label: node.label, role: 'reference' })
+      }
+    }
+
+    return { tables: tablesWithColumn, edges: colEdges, path }
+  }, [selectedColumn, allTableColumns, data, nodeMap])
+
   if (loading) {
     return (
       <div style={{ padding: '28px 36px', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '400px' }}>
@@ -278,9 +368,6 @@ export default function LineagePage() {
     )
   }
   if (!data) return null
-
-  const laidOut = layoutNodes(data.nodes, data.edges)
-  const nodeMap = new Map(laidOut.map(n => [n.id, n]))
 
   // Layer labels — pick the dominant type in each layer column
   const layerLabels: Record<number, string> = {}
@@ -375,7 +462,7 @@ export default function LineagePage() {
             background: '#fff', border: '1px solid #ebe8df', padding: '6px 14px',
             borderRadius: '8px', fontSize: '12.5px', color: '#475569', cursor: 'pointer', fontWeight: 500,
           }}>🔄 Refresh</button>
-          <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }`}</style>
+          <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } } @keyframes dashFlow { to { stroke-dashoffset: -24 } }`}</style>
         </div>
       </div>
 
@@ -437,12 +524,168 @@ export default function LineagePage() {
 
       {/* SVG Graph */}
       <div style={{ background: '#fff', border: '1px solid #ebe8df', borderRadius: '14px', padding: '16px', overflowX: 'auto', position: 'relative' }}>
+        {/* ── Floating Column Popup on graph ── */}
+        {selectedNode && selectedNode.type !== 'source' && (
+          <div style={{
+            position: 'absolute',
+            left: (selectedNode.x ?? 0) + NODE_W + 28,
+            top: (selectedNode.y ?? 0) + 16,
+            width: 320, maxHeight: 480,
+            background: '#fff', borderRadius: '14px',
+            border: '2px solid #93c5fd',
+            boxShadow: '0 12px 40px rgba(37,99,235,0.18)',
+            zIndex: 50,
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            {/* Popup Header */}
+            <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '1px solid #f1f5f9' }}>
+              <span style={{ fontSize: '18px' }}>{selectedNode.icon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedNode.label}</div>
+                <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                  {selectedNode.schema} / {selectedNode.label}
+                  {selectedNode.rowCount != null ? ` · ${selectedNode.rowCount.toLocaleString()} rows` : ''}
+                </div>
+              </div>
+              {/* Search toggle */}
+              <button onClick={() => setColumnSearch(columnSearch ? '' : ' ')}
+                style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #e2e8f0', background: columnSearch ? '#eef4ff' : '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', color: '#64748b' }}>🔍</button>
+              {/* Status */}
+              <span style={{ width: 24, height: 24, borderRadius: '50%', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px' }}>✓</span>
+              {/* Close */}
+              <button onClick={() => setSelected(null)}
+                style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', color: '#94a3b8' }}>✕</button>
+            </div>
+
+            {/* Search input (shown when active) */}
+            {columnSearch !== '' && (
+              <div style={{ padding: '8px 14px', borderBottom: '1px solid #f1f5f9' }}>
+                <input
+                  autoFocus
+                  value={columnSearch.trim() === '' ? '' : columnSearch}
+                  onChange={e => setColumnSearch(e.target.value)}
+                  placeholder="Search columns..."
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '12px', outline: 'none', background: '#fafaf9', boxSizing: 'border-box' }}
+                />
+              </div>
+            )}
+
+            {/* Column list */}
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+              {columnsLoading ? (
+                <div style={{ padding: '30px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>Loading columns...</div>
+              ) : filteredColumns && filteredColumns.length > 0 ? filteredColumns.map((col, i) => {
+                const dt = dtIcon(col.DATA_TYPE)
+                const isColSelected = selectedColumn === col.COLUMN_NAME
+                // Count how many other tables have this column
+                const colTableCount = [...allTableColumns.values()].filter(cols => cols.includes(col.COLUMN_NAME)).length
+                return (
+                  <div key={i}
+                    onClick={() => setSelectedColumn(isColSelected ? null : col.COLUMN_NAME)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      padding: '9px 14px',
+                      borderBottom: '1px solid #f8f6f0',
+                      background: isColSelected ? '#eff6ff' : (i % 2 === 0 ? '#fff' : '#fafaf9'),
+                      borderLeft: isColSelected ? '3px solid #8b5cf6' : '3px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!isColSelected) e.currentTarget.style.background = '#f8fafc' }}
+                    onMouseLeave={e => { if (!isColSelected) e.currentTarget.style.background = i % 2 === 0 ? '#fff' : '#fafaf9' }}
+                  >
+                    <span style={{
+                      width: 22, height: 22, borderRadius: 4,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '12px', fontWeight: 700, color: isColSelected ? '#8b5cf6' : dt.color,
+                      background: isColSelected ? '#8b5cf612' : dt.color + '12', flexShrink: 0,
+                    }}>{dt.symbol}</span>
+                    <span style={{
+                      flex: 1, fontSize: '13px', fontWeight: isColSelected ? 700 : 500, color: isColSelected ? '#4c1d95' : '#1a1a1a', fontFamily: 'monospace',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{col.COLUMN_NAME}</span>
+                    {colTableCount > 1 && (
+                      <span style={{
+                        background: isColSelected ? '#8b5cf6' : '#e2e8f0',
+                        color: isColSelected ? '#fff' : '#64748b',
+                        padding: '1px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: 600, flexShrink: 0,
+                      }}>{colTableCount}</span>
+                    )}
+                    <span style={{ fontSize: '11px', color: col.IS_NULLABLE === 'NO' ? '#16a34a' : '#cbd5e1', flexShrink: 0 }}>
+                      {col.IS_NULLABLE === 'NO' ? '●' : '○'}
+                    </span>
+                  </div>
+                )
+              }) : (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>
+                  {columnSearch ? 'No matching columns' : 'No columns available'}
+                </div>
+              )}
+            </div>
+
+            {/* Column Lineage Panel (when a column is selected) */}
+            {selectedColumn && columnLineage.path.length > 0 && (
+              <div style={{ borderTop: '2px solid #8b5cf6', background: '#faf5ff', padding: '10px 14px', maxHeight: '160px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '12px' }}>🔗</span>
+                  <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#6d28d9' }}>
+                    COLUMN LINEAGE: {selectedColumn}
+                  </span>
+                  <span style={{ fontSize: '10px', color: '#a78bfa', marginLeft: 'auto' }}>
+                    {columnLineage.path.length} table{columnLineage.path.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {columnLineage.path.map((item, i) => {
+                    const roleColors: Record<string, { bg: string; color: string; label: string }> = {
+                      origin: { bg: '#dcfce7', color: '#16a34a', label: 'ORIGIN' },
+                      passthrough: { bg: '#dbeafe', color: '#2563eb', label: 'PASS' },
+                      consumer: { bg: '#fef3c7', color: '#d97706', label: 'CONSUMER' },
+                      reference: { bg: '#f3e8ff', color: '#7c3aed', label: 'REF' },
+                    }
+                    const rc = roleColors[item.role] ?? roleColors.reference
+                    return (
+                      <div key={item.tableId} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {i > 0 && <span style={{ fontSize: '10px', color: '#a78bfa' }}>→</span>}
+                        {i === 0 && <span style={{ fontSize: '10px', color: '#a78bfa' }}>◆</span>}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); selectNode(item.tableId) }}
+                          style={{
+                            background: '#fff', border: '1px solid #e9d5ff', borderRadius: '6px',
+                            padding: '3px 8px', fontSize: '11.5px', fontWeight: 600, color: '#4c1d95',
+                            cursor: 'pointer', fontFamily: 'monospace',
+                          }}
+                        >{item.label}</button>
+                        <span style={{
+                          background: rc.bg, color: rc.color, padding: '1px 5px',
+                          borderRadius: '4px', fontSize: '9px', fontWeight: 700,
+                        }}>{rc.label}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Popup Footer */}
+            <div style={{ padding: '8px 14px', borderTop: '1px solid #ebe8df', background: '#fafaf9' }}>
+              <div style={{ fontSize: '11px', color: selectedColumn ? '#6d28d9' : '#94a3b8' }}>
+                {selectedColumn
+                  ? `🔗 ${selectedColumn} flows through ${columnLineage.path.length} tables`
+                  : `${columnData?.length ?? 0} columns · click any column for lineage`}
+              </div>
+            </div>
+          </div>
+        )}
+
         <svg width={Math.max(maxX, 1000)} height={Math.max(maxY, 500)} viewBox={`0 0 ${Math.max(maxX, 1000)} ${Math.max(maxY, 500)}`} style={{ display: 'block', minWidth: `${Math.max(maxX, 1000)}px` }}>
           <defs>
             <marker id="arrow" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#cbd5e1" /></marker>
             <marker id="arrow-hl" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#2563eb" /></marker>
             <marker id="arrow-up" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#16a34a" /></marker>
             <marker id="arrow-dn" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#ea580c" /></marker>
+            <marker id="arrow-col" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#8b5cf6" /></marker>
           </defs>
 
           {/* Layer labels at top */}
@@ -485,31 +728,76 @@ export default function LineagePage() {
             )
           })}
 
+          {/* Column-level lineage edges (drawn on top of table edges) */}
+          {selectedColumn && columnLineage.edges.map((edge, i) => {
+            const from = nodeMap.get(edge.from)
+            const to = nodeMap.get(edge.to)
+            if (!from || !to) return null
+            const fx = (from.x ?? 0) + NODE_W - 4
+            const fy = (from.y ?? 0) + NODE_H / 2 + 10
+            const tx = (to.x ?? 0) + 4
+            const ty = (to.y ?? 0) + NODE_H / 2 + 10
+            const midX = (fx + tx) / 2
+            return (
+              <g key={`col-edge-${i}`}>
+                {/* Glow effect */}
+                <path
+                  d={`M${fx},${fy} C${midX},${fy} ${midX},${ty} ${tx},${ty}`}
+                  fill="none" stroke="#8b5cf6" strokeWidth={6} opacity={0.15}
+                />
+                {/* Main line */}
+                <path
+                  d={`M${fx},${fy} C${midX},${fy} ${midX},${ty} ${tx},${ty}`}
+                  fill="none" stroke="#8b5cf6" strokeWidth={2.5}
+                  strokeDasharray="8 4"
+                  markerEnd="url(#arrow-col)" opacity={0.9}
+                  style={{ animation: 'dashFlow 1.5s linear infinite' }}
+                />
+              </g>
+            )
+          })}
+
           {/* Nodes */}
           {laidOut.map(node => {
             const cfg = typeConfig[node.type] ?? typeConfig.warehouse
             const isSel = selected === node.id
             const isDimmed = highlighted && !highlighted.has(node.id)
+            const isInColLineage = selectedColumn ? columnLineage.tables.has(node.id) : false
             const nx = node.x ?? 0
             const ny = node.y ?? 0
             return (
               <g key={node.id} style={{ cursor: 'pointer' }} onClick={() => selectNode(node.id)}>
+                {/* Column lineage glow ring */}
+                {isInColLineage && (
+                  <rect x={nx - 3} y={ny - 3} width={NODE_W + 6} height={NODE_H + 6} rx={12}
+                    fill="none" stroke="#8b5cf6" strokeWidth={2} opacity={0.5}
+                    strokeDasharray="6 3"
+                    style={{ animation: 'dashFlow 2s linear infinite' }}
+                  />
+                )}
                 <rect x={nx} y={ny} width={NODE_W} height={NODE_H} rx={10}
-                  fill={cfg.bg}
-                  stroke={isSel ? '#2563eb' : cfg.border}
-                  strokeWidth={isSel ? 2.5 : 1.5}
-                  opacity={isDimmed ? 0.2 : 1}
-                  filter={isSel ? 'drop-shadow(0 0 8px rgba(37,99,235,0.3))' : undefined}
+                  fill={isInColLineage ? '#faf5ff' : cfg.bg}
+                  stroke={isInColLineage ? '#8b5cf6' : isSel ? '#2563eb' : cfg.border}
+                  strokeWidth={isInColLineage ? 2.5 : isSel ? 2.5 : 1.5}
+                  opacity={isDimmed && !isInColLineage ? 0.2 : 1}
+                  filter={isInColLineage ? 'drop-shadow(0 0 8px rgba(139,92,246,0.3))' : isSel ? 'drop-shadow(0 0 8px rgba(37,99,235,0.3))' : undefined}
                   style={{ transition: 'all 0.2s' }}
                 />
-                <text x={nx + 14} y={ny + 28} fontSize="16" opacity={isDimmed ? 0.2 : 1}>{node.icon}</text>
-                <text x={nx + 36} y={ny + 28} fontSize="12" fontWeight={isSel ? 700 : 600} fill={cfg.color} opacity={isDimmed ? 0.2 : 1} fontFamily="system-ui,sans-serif">
+                <text x={nx + 14} y={ny + 28} fontSize="16" opacity={isDimmed && !isInColLineage ? 0.2 : 1}>{node.icon}</text>
+                <text x={nx + 36} y={ny + 28} fontSize="12" fontWeight={isSel || isInColLineage ? 700 : 600} fill={isInColLineage ? '#6d28d9' : cfg.color} opacity={isDimmed && !isInColLineage ? 0.2 : 1} fontFamily="system-ui,sans-serif">
                   {node.label.length > 22 ? node.label.slice(0, 20) + '…' : node.label}
                 </text>
-                <text x={nx + 36} y={ny + 46} fontSize="10" fill={cfg.color} opacity={isDimmed ? 0.1 : 0.55} fontFamily="system-ui,sans-serif">
+                <text x={nx + 36} y={ny + 46} fontSize="10" fill={isInColLineage ? '#8b5cf6' : cfg.color} opacity={isDimmed && !isInColLineage ? 0.1 : 0.55} fontFamily="system-ui,sans-serif">
                   {node.rowCount ? `${node.rowCount.toLocaleString()} rows · ` : ''}{node.sub}
                 </text>
-                {node.rowCount != null && (
+                {/* Column lineage badge on node */}
+                {isInColLineage && (
+                  <g>
+                    <rect x={nx + NODE_W - 42} y={ny + NODE_H - 18} width={36} height={14} rx={7} fill="#8b5cf6" />
+                    <text x={nx + NODE_W - 24} y={ny + NODE_H - 9} textAnchor="middle" fontSize="8" fill="#fff" fontWeight="700" fontFamily="system-ui,sans-serif">COL</text>
+                  </g>
+                )}
+                {node.rowCount != null && !isInColLineage && (
                   <circle cx={nx + NODE_W - 12} cy={ny + 16} r={5} fill="#16a34a" opacity={isDimmed ? 0.1 : 0.8} />
                 )}
               </g>
@@ -621,6 +909,65 @@ export default function LineagePage() {
             </div>
           </div>
 
+          {/* Column-level lineage detail (when column is selected) */}
+          {selectedColumn && columnLineage.path.length > 1 && (
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid #f1f5f9', background: '#faf5ff' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '14px' }}>🔗</span>
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: '#6d28d9' }}>COLUMN LINEAGE: {selectedColumn}</span>
+                  <span style={{
+                    background: '#8b5cf6', color: '#fff', padding: '2px 10px',
+                    borderRadius: '20px', fontSize: '11px', fontWeight: 600,
+                  }}>{columnLineage.path.length} tables</span>
+                </div>
+                <button onClick={() => setSelectedColumn(null)} style={{
+                  background: '#f3e8ff', border: '1px solid #d8b4fe', padding: '4px 12px',
+                  borderRadius: '6px', fontSize: '11.5px', color: '#6d28d9', cursor: 'pointer', fontWeight: 500,
+                }}>✕ Clear</button>
+              </div>
+
+              {/* Column flow visualization */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+                padding: '12px 16px', background: '#fff', borderRadius: '10px', border: '1px solid #e9d5ff',
+              }}>
+                {columnLineage.path.map((item, i) => {
+                  const roleColors: Record<string, { bg: string; color: string; border: string; label: string }> = {
+                    origin: { bg: '#dcfce7', color: '#16a34a', border: '#86efac', label: '🟢 ORIGIN' },
+                    passthrough: { bg: '#dbeafe', color: '#2563eb', border: '#93c5fd', label: '🔵 PASS-THROUGH' },
+                    consumer: { bg: '#fef3c7', color: '#d97706', border: '#fcd34d', label: '🟡 CONSUMER' },
+                    reference: { bg: '#f3e8ff', color: '#7c3aed', border: '#d8b4fe', label: '🟣 REFERENCE' },
+                  }
+                  const rc = roleColors[item.role] ?? roleColors.reference
+                  const isCurrentTable = item.tableId === selected
+                  return (
+                    <div key={item.tableId} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {i > 0 && (
+                        <svg width="24" height="12"><path d="M0,6 L18,6 M14,2 L18,6 L14,10" fill="none" stroke="#8b5cf6" strokeWidth="2" /></svg>
+                      )}
+                      <button
+                        onClick={() => selectNode(item.tableId)}
+                        style={{
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',
+                          padding: '8px 14px', borderRadius: '10px',
+                          border: isCurrentTable ? '2px solid #8b5cf6' : `1px solid ${rc.border}`,
+                          background: isCurrentTable ? '#ede9fe' : rc.bg,
+                          cursor: 'pointer',
+                          boxShadow: isCurrentTable ? '0 0 0 3px #c4b5fd' : 'none',
+                        }}
+                      >
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: '#1a1a1a', fontFamily: 'monospace' }}>{item.label}</span>
+                        <span style={{ fontSize: '10px', fontWeight: 600, color: rc.color }}>{rc.label}</span>
+                        <span style={{ fontSize: '10px', color: '#64748b', fontFamily: 'monospace' }}>{selectedColumn}</span>
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Column Table */}
           <div style={{ padding: '16px 24px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
@@ -642,8 +989,8 @@ export default function LineagePage() {
             ) : (
               <div style={{ borderRadius: '10px', border: '1px solid #ebe8df', overflow: 'hidden' }}>
                 {/* Table header */}
-                <div style={{ display: 'grid', gridTemplateColumns: '50px 1fr 120px 100px 1fr', gap: '0', padding: '8px 16px', background: '#fafaf9', borderBottom: '1px solid #ebe8df' }}>
-                  {['#', 'COLUMN', 'TYPE', 'NULLABLE', 'PATH'].map(h => (
+                <div style={{ display: 'grid', gridTemplateColumns: '50px 1fr 120px 100px 80px 1fr', gap: '0', padding: '8px 16px', background: '#fafaf9', borderBottom: '1px solid #ebe8df' }}>
+                  {['#', 'COLUMN', 'TYPE', 'NULLABLE', 'LINEAGE', 'PATH'].map(h => (
                     <div key={h} style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</div>
                   ))}
                 </div>
@@ -651,16 +998,25 @@ export default function LineagePage() {
                 {filteredColumns && filteredColumns.length > 0 ? filteredColumns.map((col, i) => {
                   const dt = dtIcon(col.DATA_TYPE)
                   const isPK = col.ORDINAL_POSITION === 1 && col.IS_NULLABLE === 'NO'
+                  const isColSel = selectedColumn === col.COLUMN_NAME
+                  const colTableCount = [...allTableColumns.values()].filter(cols => cols.includes(col.COLUMN_NAME)).length
                   return (
-                    <div key={i} style={{
-                      display: 'grid', gridTemplateColumns: '50px 1fr 120px 100px 1fr', gap: '0',
-                      padding: '9px 16px', borderBottom: '1px solid #f8f6f0',
-                      background: i % 2 === 0 ? '#fff' : '#fafaf9',
-                    }}>
+                    <div key={i}
+                      onClick={() => setSelectedColumn(isColSel ? null : col.COLUMN_NAME)}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '50px 1fr 120px 100px 80px 1fr', gap: '0',
+                        padding: '9px 16px', borderBottom: '1px solid #f8f6f0',
+                        background: isColSel ? '#ede9fe' : (i % 2 === 0 ? '#fff' : '#fafaf9'),
+                        borderLeft: isColSel ? '3px solid #8b5cf6' : '3px solid transparent',
+                        cursor: 'pointer', transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={e => { if (!isColSel) e.currentTarget.style.background = '#f8fafc' }}
+                      onMouseLeave={e => { if (!isColSel) e.currentTarget.style.background = isColSel ? '#ede9fe' : (i % 2 === 0 ? '#fff' : '#fafaf9') }}
+                    >
                       <div style={{ fontSize: '12px', color: '#94a3b8' }}>{col.ORDINAL_POSITION}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {isPK && <span style={{ fontSize: '12px' }}>🔑</span>}
-                        <span style={{ fontWeight: isPK ? 700 : 500, fontSize: '13px', color: isPK ? '#1d4ed8' : '#1a1a1a', fontFamily: 'monospace' }}>{col.COLUMN_NAME}</span>
+                        <span style={{ fontWeight: isPK || isColSel ? 700 : 500, fontSize: '13px', color: isColSel ? '#4c1d95' : isPK ? '#1d4ed8' : '#1a1a1a', fontFamily: 'monospace' }}>{col.COLUMN_NAME}</span>
                       </div>
                       <div>
                         <span style={{
@@ -673,6 +1029,18 @@ export default function LineagePage() {
                           <span style={{ color: '#16a34a', fontSize: '12px', fontWeight: 600 }}>✓ Not Null</span>
                         ) : (
                           <span style={{ color: '#94a3b8', fontSize: '12px' }}>○ Nullable</span>
+                        )}
+                      </div>
+                      <div>
+                        {colTableCount > 1 ? (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: '3px',
+                            background: isColSel ? '#8b5cf6' : '#f3e8ff',
+                            color: isColSel ? '#fff' : '#7c3aed',
+                            padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
+                          }}>🔗 {colTableCount}</span>
+                        ) : (
+                          <span style={{ fontSize: '11px', color: '#cbd5e1' }}>—</span>
                         )}
                       </div>
                       <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>
@@ -696,7 +1064,9 @@ export default function LineagePage() {
               <span style={{ color: '#ea580c', display: 'flex', alignItems: 'center', gap: '4px' }}>📉 {totalDownstream} total downstream</span>
               <span style={{ color: '#2563eb', display: 'flex', alignItems: 'center', gap: '4px' }}>⬆ {upstreamChain.length}-hop path to source</span>
             </div>
-            <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>Click any node in the chain to drill down</div>
+            <div style={{ fontSize: '11.5px', color: selectedColumn ? '#6d28d9' : '#94a3b8' }}>
+              {selectedColumn ? `🔗 Showing lineage for ${selectedColumn}` : 'Click any column to see its lineage'}
+            </div>
           </div>
         </div>
       )}

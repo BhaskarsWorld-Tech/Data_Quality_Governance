@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { CheckResult, Connection } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
+import { loadConnections } from '@/lib/seedData'
 
 interface DashboardStats {
   totalRules: number; enabledRules: number; totalConnections: number
@@ -30,13 +31,14 @@ function ConnectionSelector() {
   const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
-    fetch('/api/connections').then(r => r.json()).then(data => {
-      const conns = Array.isArray(data) ? data : (data.connections ?? [])
-      setConnections(conns)
-      const active = conns.find((c: Connection) => c.status === 'active')
-      if (active) setActiveId(active.id)
-      else if (conns.length > 0) setActiveId(conns[0].id)
-    }).catch(() => {})
+    loadConnections().then(conns => {
+      if (conns.length > 0) {
+        setConnections(conns)
+        const active = conns.find((c: Connection) => c.status === 'active')
+        if (active) setActiveId(active.id)
+        else setActiveId(conns[0].id)
+      }
+    })
   }, [])
 
   const active = connections.find(c => c.id === activeId)

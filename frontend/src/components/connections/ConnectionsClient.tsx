@@ -1,8 +1,11 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Connection, ConnectionType } from '@/lib/types'
 import { formatDateTime, connectionIcons } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
+
+/* ─── localStorage persistence for edge deployments ─── */
+const LS_KEY = 'dataguard_connections'
 
 interface TestStep { label: string; status: 'ok' | 'fail' | 'skip'; detail: string }
 interface TestResult {
@@ -190,14 +193,36 @@ interface Props { initialConnections: Connection[] }
 type FormState = Record<string, string> & { name: string; type: ConnectionType }
 
 export default function ConnectionsClient({ initialConnections }: Props) {
-  const [connections, setConnections] = useState(initialConnections)
+  // On mount: merge localStorage with server-provided data
+  const [connections, setConnections] = useState<Connection[]>(() => {
+    // SSR-safe: only read localStorage on client
+    if (typeof window === 'undefined') return initialConnections
+    try {
+      const raw = localStorage.getItem(LS_KEY)
+      const stored: Connection[] = raw ? JSON.parse(raw) : []
+      if (stored.length > 0) {
+        const storedIds = new Set(stored.map(c => c.id))
+        return [...stored, ...initialConnections.filter(c => !storedIds.has(c.id))]
+      }
+    } catch { /* ignore */ }
+    return initialConnections
+  })
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<FormState>({ name: '', type: 'postgresql' })
   const [testing, setTesting] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<{ result: TestResult; connName: string } | null>(null)
-  const router = useRouter()
+  const _router = useRouter()
+
+  // Persist to localStorage whenever connections change + notify sidebar
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(connections))
+      // Notify sidebar's connection selector to re-read
+      window.dispatchEvent(new Event('dataguard-connections-updated'))
+    } catch { /* quota */ }
+  }, [connections])
 
   const fields = typeFields[form.type] || []
   const connInfo = typeInfo[form.type]
@@ -252,21 +277,26 @@ export default function ConnectionsClient({ initialConnections }: Props) {
 
     resetForm()
     setSaving(false)
-    router.refresh()
+    // state is managed locally — no server refresh needed
   }
 
   async function testConn(id: string, connName: string) {
     setTesting(id)
     try {
+      // Send full connection data so the test endpoint doesn't depend on server-side store
+      const conn = connections.find(c => c.id === id)
       const res = await fetch('/api/connections/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: id })
+        body: JSON.stringify({ connectionId: id, connectionData: conn })
       })
       const result: TestResult = await res.json()
-      // Refresh connection list to pick up new status
-      const updated = await fetch('/api/connections').then(r => r.json())
-      setConnections(updated)
+      // Update local connection status based on test result
+      if (result.status) {
+        setConnections(prev => prev.map(c =>
+          c.id === id ? { ...c, status: result.status as Connection['status'], lastTested: new Date().toISOString() } : c
+        ))
+      }
       setTestResult({ result, connName })
     } catch (e: unknown) {
       setTestResult({
@@ -281,7 +311,7 @@ export default function ConnectionsClient({ initialConnections }: Props) {
       })
     } finally {
       setTesting(null)
-      router.refresh()
+      // state is managed locally — no server refresh needed
     }
   }
 
@@ -289,7 +319,7 @@ export default function ConnectionsClient({ initialConnections }: Props) {
     if (!confirm('Delete this connection?')) return
     await fetch(`/api/connections?id=${id}`, { method: 'DELETE' })
     setConnections(prev => prev.filter(c => c.id !== id))
-    router.refresh()
+    // state is managed locally — no server refresh needed
   }
 
   const inp = (full?: boolean): React.CSSProperties => ({

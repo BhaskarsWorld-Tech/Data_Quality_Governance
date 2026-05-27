@@ -1,18 +1,64 @@
-import fs from 'fs'
-import path from 'path'
 import { Connection, Rule, Report } from './types'
 
-const dataDir = path.join(process.cwd(), 'data')
+/* ─── Edge-safe file store ─── */
+// On Node.js (local dev / self-hosted): uses fs to read/write JSON files in data/
+// On Cloudflare Workers (edge): falls back to bundled seed data (read-only mode)
+
+let fs: typeof import('fs') | null = null
+let path: typeof import('path') | null = null
+
+try {
+  // Dynamic require — only works in Node.js, silently fails on edge runtimes
+  fs = require('fs')
+  path = require('path')
+} catch {
+  // Running on edge (Cloudflare Workers) — fs not available
+}
+
+const isEdge = !fs || !path
+
+// In-memory cache for edge runtime (seeded from bundled data)
+const memoryStore: Record<string, unknown[]> = {}
+
+// Bundled seed data for edge/demo mode
+const SEED_DATA: Record<string, unknown[]> = {
+  'connections.json': [],
+  'rules.json': [],
+  'reports.json': [],
+}
+
+function getDataDir(): string {
+  if (!path) return ''
+  return path.join(process.cwd(), 'data')
+}
 
 function readJSON<T>(filename: string): T[] {
-  const filepath = path.join(dataDir, filename)
-  if (!fs.existsSync(filepath)) return []
-  return JSON.parse(fs.readFileSync(filepath, 'utf-8'))
+  if (isEdge) {
+    // Edge runtime: return in-memory data or seed
+    return (memoryStore[filename] ?? SEED_DATA[filename] ?? []) as T[]
+  }
+  try {
+    const filepath = path!.join(getDataDir(), filename)
+    if (!fs!.existsSync(filepath)) return []
+    return JSON.parse(fs!.readFileSync(filepath, 'utf-8'))
+  } catch {
+    return []
+  }
 }
 
 function writeJSON<T>(filename: string, data: T[]): void {
-  const filepath = path.join(dataDir, filename)
-  fs.writeFileSync(filepath, JSON.stringify(data, null, 2))
+  if (isEdge) {
+    // Edge runtime: write to in-memory store only
+    memoryStore[filename] = data
+    return
+  }
+  try {
+    const filepath = path!.join(getDataDir(), filename)
+    fs!.writeFileSync(filepath, JSON.stringify(data, null, 2))
+  } catch {
+    // Write failed — directory may not exist on read-only filesystem
+    memoryStore[filename] = data
+  }
 }
 
 export const store = {

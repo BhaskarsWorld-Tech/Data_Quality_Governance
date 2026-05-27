@@ -34,8 +34,23 @@ export default function GlossaryPage() {
   const [search, setSearch] = useState('')
   const [domain, setDomain] = useState('All')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [terms, setTerms] = useState<GlossaryTerm[]>(TERMS)
+  const [showAdd, setShowAdd] = useState(false)
+  const [termForm, setTermForm] = useState({ name: '', definition: '', domain: 'Finance', synonyms: '', owner: '', status: 'draft' as 'approved' | 'draft' | 'deprecated' })
 
-  const filtered = TERMS.filter(t => {
+  const addTerm = () => {
+    if (!termForm.name) return
+    const newTerm: GlossaryTerm = {
+      id: `g${Date.now()}`, name: termForm.name, definition: termForm.definition,
+      domain: termForm.domain, synonyms: termForm.synonyms.split(',').map(s => s.trim()).filter(Boolean),
+      owner: termForm.owner || 'Unassigned', linkedAssets: 0, status: termForm.status,
+    }
+    setTerms(prev => [newTerm, ...prev])
+    setShowAdd(false)
+    setTermForm({ name: '', definition: '', domain: 'Finance', synonyms: '', owner: '', status: 'draft' })
+  }
+
+  const filtered = terms.filter(t => {
     if (domain !== 'All' && t.domain !== domain) return false
     if (search && !t.name.toLowerCase().includes(search.toLowerCase()) && !t.definition.toLowerCase().includes(search.toLowerCase())) return false
     return true
@@ -47,9 +62,9 @@ export default function GlossaryPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: '0 0 4px' }}>Business Glossary</h1>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Standardized business terminology across the organization · {TERMS.length} terms defined</p>
+          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Standardized business terminology across the organization · {terms.length} terms defined</p>
         </div>
-        <button style={{ background: '#E8541A', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>+ Add Term</button>
+        <button onClick={() => setShowAdd(true)} style={{ background: '#E8541A', color: '#fff', border: 'none', padding: '8px 18px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>+ Add Term</button>
       </div>
 
       {/* Search + Filters */}
@@ -117,6 +132,70 @@ export default function GlossaryPage() {
           )
         })}
       </div>
+
+      {/* Add Term Modal */}
+      {showAdd && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }} onClick={() => setShowAdd(false)} />
+          <div style={{ background: '#fff', borderRadius: '14px', width: '480px', maxHeight: '85vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', position: 'relative', zIndex: 1 }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #ebe8df' }}>
+              <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>Add Glossary Term</div>
+              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Define a new business term for the organization</div>
+            </div>
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Term Name *</label>
+                <input value={termForm.name} onChange={e => setTermForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. ARR, Churn Rate" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Definition *</label>
+                <textarea value={termForm.definition} onChange={e => setTermForm(f => ({ ...f, definition: e.target.value }))} rows={3} placeholder="Clear, concise definition..." style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', resize: 'vertical' as const, boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Domain</label>
+                  <select value={termForm.domain} onChange={e => setTermForm(f => ({ ...f, domain: e.target.value }))} style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none' }}>
+                    {DOMAINS.filter(d => d !== 'All').map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Owner</label>
+                  <input value={termForm.owner} onChange={e => setTermForm(f => ({ ...f, owner: e.target.value }))} placeholder="Team or person" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Synonyms (comma-separated)</label>
+                <input value={termForm.synonyms} onChange={e => setTermForm(f => ({ ...f, synonyms: e.target.value }))} placeholder="e.g. Revenue, Sales" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Status</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  {(['draft', 'approved', 'deprecated'] as const).map(s => {
+                    const st = statusStyle(s)
+                    return (
+                      <button key={s} type="button" onClick={() => setTermForm(f => ({ ...f, status: s }))} style={{
+                        padding: '8px', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', textTransform: 'capitalize',
+                        border: termForm.status === s ? `2px solid ${st.color}` : '1px solid #e2e8f0',
+                        background: termForm.status === s ? st.bg : '#fafaf9',
+                        fontSize: '12px', fontWeight: termForm.status === s ? 700 : 500, color: termForm.status === s ? st.color : '#475569',
+                      }}>{s}</button>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #ebe8df', display: 'flex', gap: '10px' }}>
+              <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={addTerm} disabled={!termForm.name || !termForm.definition} style={{
+                flex: 2, padding: '10px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
+                cursor: termForm.name && termForm.definition ? 'pointer' : 'not-allowed',
+                background: termForm.name && termForm.definition ? '#E8541A' : '#e2e8f0',
+                color: termForm.name && termForm.definition ? '#fff' : '#94a3b8'
+              }}>Add Term</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

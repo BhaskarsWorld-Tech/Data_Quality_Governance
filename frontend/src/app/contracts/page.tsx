@@ -137,13 +137,30 @@ export default function ContractsPage() {
   const [filter, setFilter]     = useState<FilterType>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [search, setSearch]     = useState('')
+  const [allContracts, setAllContracts] = useState(contracts)
+  const [showAdd, setShowAdd] = useState(false)
+  const [cForm, setCForm] = useState({ name: '', producer: '', consumer: '', owner: '', description: '', sla: '99%', connection: 'SF_Codex' })
 
-  const total   = contracts.length
-  const active  = contracts.filter(c => c.status === 'active').length
-  const breached = contracts.filter(c => c.status === 'breached').length
-  const avgComp = Math.round(contracts.reduce((s, c) => s + c.compliance, 0) / contracts.length)
+  const addContract = () => {
+    if (!cForm.name) return
+    const nc: Contract = {
+      id: `ct${Date.now()}`, name: cForm.name, producer: cForm.producer, consumer: cForm.consumer,
+      owner: cForm.owner || 'Unassigned', status: 'active', compliance: 100,
+      checks: 0, failures: 0, created: new Date().toISOString().split('T')[0],
+      connection: cForm.connection, description: cForm.description, sla: cForm.sla,
+      terms: [], lastChecked: 'Never', trend: '— New',
+    }
+    setAllContracts(prev => [nc, ...prev])
+    setShowAdd(false)
+    setCForm({ name: '', producer: '', consumer: '', owner: '', description: '', sla: '99%', connection: 'SF_Codex' })
+  }
 
-  const filtered = contracts.filter(c => {
+  const total   = allContracts.length
+  const active  = allContracts.filter(c => c.status === 'active').length
+  const breached = allContracts.filter(c => c.status === 'breached').length
+  const avgComp = Math.round(allContracts.reduce((s, c) => s + c.compliance, 0) / allContracts.length)
+
+  const filtered = allContracts.filter(c => {
     const matchFilter =
       filter === 'all'     ? true :
       filter === 'active'  ? c.status === 'active' || c.status === 'warning' :
@@ -176,7 +193,7 @@ export default function ContractsPage() {
             {breached > 0 && <span style={{ color: '#dc2626', fontWeight: 600 }}> — {breached} breach{breached > 1 ? 'es' : ''} active</span>}
           </p>
         </div>
-        <button style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>
+        <button onClick={() => setShowAdd(true)} style={{ background: '#E8541A', border: 'none', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
           + New Contract
         </button>
       </div>
@@ -393,6 +410,63 @@ export default function ContractsPage() {
           </div>
         )}
       </div>
+
+      {/* New Contract Modal */}
+      {showAdd && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }} onClick={() => setShowAdd(false)} />
+          <div style={{ background: '#fff', borderRadius: '14px', width: '520px', maxHeight: '85vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', position: 'relative', zIndex: 1 }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #ebe8df' }}>
+              <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>New Data Contract</div>
+              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Define an agreement between data producer and consumer</div>
+            </div>
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Contract Name *</label>
+                <input value={cForm.name} onChange={e => setCForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Orders → Revenue Model" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Description</label>
+                <textarea value={cForm.description} onChange={e => setCForm(f => ({ ...f, description: e.target.value }))} rows={2} placeholder="What this contract enforces..." style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', resize: 'vertical' as const, boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Producer (source table) *</label>
+                  <input value={cForm.producer} onChange={e => setCForm(f => ({ ...f, producer: e.target.value }))} placeholder="e.g. fact_orders" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Consumer (downstream) *</label>
+                  <input value={cForm.consumer} onChange={e => setCForm(f => ({ ...f, consumer: e.target.value }))} placeholder="e.g. finance_report" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Owner</label>
+                  <input value={cForm.owner} onChange={e => setCForm(f => ({ ...f, owner: e.target.value }))} placeholder="Name" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>SLA Target</label>
+                  <select value={cForm.sla} onChange={e => setCForm(f => ({ ...f, sla: e.target.value }))} style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none' }}>
+                    <option value="99.9%">99.9%</option>
+                    <option value="99%">99%</option>
+                    <option value="98%">98%</option>
+                    <option value="95%">95%</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #ebe8df', display: 'flex', gap: '10px' }}>
+              <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={addContract} disabled={!cForm.name || !cForm.producer || !cForm.consumer} style={{
+                flex: 2, padding: '10px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
+                cursor: cForm.name && cForm.producer && cForm.consumer ? 'pointer' : 'not-allowed',
+                background: cForm.name && cForm.producer && cForm.consumer ? '#E8541A' : '#e2e8f0',
+                color: cForm.name && cForm.producer && cForm.consumer ? '#fff' : '#94a3b8'
+              }}>Create Contract</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

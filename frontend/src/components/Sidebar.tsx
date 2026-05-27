@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
+import { loadConnections } from '@/lib/seedData'
 
 /* ─── Icon helper ─── */
 const I = ({ d, size = 18 }: { d: string; size?: number }) => (
@@ -22,15 +23,36 @@ function TopBarConnectionSelector() {
   const [open, setOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const selectorPathname = usePathname()
 
+  // Load connections on mount and on every route change
   useEffect(() => {
-    fetch('/api/connections').then(r => r.json()).then(data => {
-      const conns = Array.isArray(data) ? data : (data.connections ?? [])
-      setConnections(conns)
-      const active = conns.find((c: { status: string }) => c.status === 'active')
-      if (active) setActiveId(active.id)
-      else if (conns.length > 0) setActiveId(conns[0].id)
-    }).catch(() => {})
+    loadConnections().then(conns => {
+      if (conns.length > 0) {
+        setConnections(conns)
+        const active = conns.find(c => c.status === 'active')
+        if (active) setActiveId(active.id)
+        else setActiveId(conns[0].id)
+      }
+    })
+  }, [selectorPathname])
+
+  // Listen for updates from ConnectionsClient
+  useEffect(() => {
+    function onUpdate() {
+      loadConnections().then(conns => {
+        setConnections(conns)
+        const active = conns.find(c => c.status === 'active')
+        if (active) setActiveId(active.id)
+        else if (conns.length > 0) setActiveId(conns[0].id)
+      })
+    }
+    window.addEventListener('storage', onUpdate)
+    window.addEventListener('dataguard-connections-updated', onUpdate)
+    return () => {
+      window.removeEventListener('storage', onUpdate)
+      window.removeEventListener('dataguard-connections-updated', onUpdate)
+    }
   }, [])
 
   useEffect(() => {
@@ -60,7 +82,7 @@ function TopBarConnectionSelector() {
 
   if (connections.length === 0) {
     return (
-      <Link href="/settings" style={{
+      <Link href="/connections" style={{
         display: 'inline-flex', alignItems: 'center', gap: '5px',
         background: '#fff', border: '1px solid #ebe8df', padding: '5px 12px',
         borderRadius: '7px', fontSize: '12px', color: '#E8541A', fontWeight: 600,
@@ -119,7 +141,7 @@ function TopBarConnectionSelector() {
               <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: conn.status === 'active' ? '#16a34a' : conn.status === 'error' ? '#dc2626' : '#d97706' }} />
             </button>
           ))}
-          <Link href="/settings" style={{
+          <Link href="/connections" style={{
             display: 'block', padding: '9px 14px', textAlign: 'center',
             fontSize: '12px', color: '#E8541A', fontWeight: 600,
             textDecoration: 'none', borderTop: '1px solid #ebe8df',
@@ -210,9 +232,10 @@ const sections: Section[] = [
 ]
 
 /* ─── Constants ─── */
-const RAIL_W  = 72
-const PANEL_W = 220
-const TOP_H   = 56
+const RAIL_W    = 72
+const EXPAND_W  = 240
+const PANEL_W   = 220
+const TOP_H     = 56
 
 function sectionForPath(pathname: string): string {
   for (const s of sections) {
@@ -224,34 +247,64 @@ function sectionForPath(pathname: string): string {
 /* ─── Component ─── */
 export default function Sidebar() {
   const pathname = usePathname()
-  const [panelOpen, setPanelOpen] = useState(false)
-  const [activeSection, setActiveSection] = useState(() => sectionForPath(pathname))
-  const panelRef = useRef<HTMLDivElement>(null)
 
-  const currentSection = sections.find(s => s.key === activeSection) ?? sections[0]
+  // Hamburger expanded mode (accordion)
+  const [expanded, setExpanded] = useState(false)
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set([sectionForPath(pathname)]))
+  const sidebarRef = useRef<HTMLDivElement>(null)
 
-  // Close panel on outside click
+  // Flyout panel mode (icon click when collapsed)
+  const [flyoutSection, setFlyoutSection] = useState<string | null>(null)
+  const flyoutRef = useRef<HTMLDivElement>(null)
+
+  // Close expanded on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (panelOpen && panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setPanelOpen(false)
+      const target = e.target as HTMLElement
+      if (target.closest('[data-hamburger]')) return
+
+      if (expanded && sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        setExpanded(false)
+      }
+      if (flyoutSection && flyoutRef.current && !flyoutRef.current.contains(e.target as Node)
+          && sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        setFlyoutSection(null)
       }
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [panelOpen])
+  }, [expanded, flyoutSection])
 
-  // Close panel on route change
-  useEffect(() => { setPanelOpen(false) }, [pathname])
+  // Close on route change
+  useEffect(() => { setExpanded(false); setFlyoutSection(null) }, [pathname])
 
-  function handleRailClick(sectionKey: string) {
-    if (panelOpen && activeSection === sectionKey) {
-      setPanelOpen(false)
+  // Close flyout when hamburger expands
+  useEffect(() => { if (expanded) setFlyoutSection(null) }, [expanded])
+
+  function toggleSection(key: string) {
+    setOpenSections(prev => {
+      const s = new Set(prev)
+      if (s.has(key)) s.delete(key); else s.add(key)
+      return s
+    })
+  }
+
+  function handleIconClick(sectionKey: string) {
+    if (expanded) {
+      // In expanded mode: toggle accordion
+      toggleSection(sectionKey)
     } else {
-      setActiveSection(sectionKey)
-      setPanelOpen(true)
+      // In collapsed mode: open flyout panel next to rail
+      if (flyoutSection === sectionKey) {
+        setFlyoutSection(null)
+      } else {
+        setFlyoutSection(sectionKey)
+      }
     }
   }
+
+  const sidebarWidth = expanded ? EXPAND_W : RAIL_W
+  const flyoutSectionData = flyoutSection ? sections.find(s => s.key === flyoutSection) : null
 
   return (
     <>
@@ -266,7 +319,8 @@ export default function Sidebar() {
       }}>
         {/* Hamburger */}
         <button
-          onClick={() => setPanelOpen(!panelOpen)}
+          data-hamburger="true"
+          onClick={() => { setExpanded(!expanded); setFlyoutSection(null) }}
           style={{
             width: 36, height: 36, borderRadius: 8,
             background: 'transparent', border: 'none',
@@ -304,61 +358,162 @@ export default function Sidebar() {
         <TopBarConnectionSelector />
       </header>
 
-      {/* ── Icon Rail (always visible) ── */}
-      <nav style={{
-        position: 'fixed', left: 0, top: TOP_H, bottom: 0,
-        width: RAIL_W,
-        background: '#ffffff',
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        paddingTop: 12, gap: 6,
-        zIndex: 55,
-        borderRight: '1px solid #ebe8df',
-        overflowY: 'auto',
-      }}>
-        {sections.map(s => {
-          const isActive = s.key === activeSection && panelOpen
-          const hasActivePage = s.items.some(i => i.href === pathname)
-          return (
-            <button
-              key={s.key}
-              title={s.label}
-              onClick={() => handleRailClick(s.key)}
-              style={{
-                width: 48, height: 48, borderRadius: 14,
-                border: 'none', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: isActive
-                  ? '#eef4ff'
-                  : hasActivePage
-                    ? '#f0f7ff'
-                    : 'transparent',
-                color: isActive
-                  ? '#2563eb'
-                  : hasActivePage
-                    ? '#3b82f6'
-                    : '#94a3b8',
-                transition: 'all 0.2s',
-              }}
-            >
-              <I d={s.railIconD} size={22} />
-            </button>
-          )
-        })}
-      </nav>
-
-      {/* ── Overlay ── */}
-      {panelOpen && (
+      {/* ── Overlay when expanded or flyout open ── */}
+      {(expanded || flyoutSection) && (
         <div style={{
           position: 'fixed', inset: 0,
           background: 'rgba(0,0,0,0.12)',
           zIndex: 49,
           transition: 'opacity 0.2s',
-        }} onClick={() => setPanelOpen(false)} />
+        }} onClick={() => { setExpanded(false); setFlyoutSection(null) }} />
       )}
 
-      {/* ── Slide-out sub-menu panel ── */}
+      {/* ── Sidebar (icon rail / expanded accordion) ── */}
+      <nav
+        ref={sidebarRef}
+        style={{
+          position: 'fixed', left: 0, top: TOP_H, bottom: 0,
+          width: sidebarWidth,
+          background: '#ffffff',
+          display: 'flex', flexDirection: 'column',
+          zIndex: 55,
+          borderRight: '1px solid #ebe8df',
+          overflowY: 'auto', overflowX: 'hidden',
+          transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+          boxShadow: expanded ? '4px 0 16px rgba(0,0,0,0.06)' : 'none',
+        }}
+      >
+        <div style={{ paddingTop: 8, paddingBottom: 8 }}>
+          {sections.map((s, sIdx) => {
+            const hasActivePage = s.items.some(i => i.href === pathname)
+            const isOpen = openSections.has(s.key)
+            const isFlyoutActive = flyoutSection === s.key
+
+            return (
+              <div key={s.key}>
+                {/* ── Section button (icon + label) ── */}
+                <button
+                  onClick={() => handleIconClick(s.key)}
+                  style={{
+                    width: '100%', border: 'none', cursor: 'pointer',
+                    display: 'flex', flexDirection: expanded ? 'row' : 'column',
+                    alignItems: 'center',
+                    gap: expanded ? 10 : 2,
+                    padding: expanded ? '10px 16px' : '8px 0',
+                    background: isFlyoutActive
+                      ? '#eef4ff'
+                      : (hasActivePage && !expanded)
+                        ? '#f0f7ff'
+                        : (expanded && isOpen)
+                          ? '#f8fafc'
+                          : 'transparent',
+                    color: (isFlyoutActive || hasActivePage) ? '#2563eb' : '#64748b',
+                    transition: 'all 0.15s',
+                    justifyContent: expanded ? 'flex-start' : 'center',
+                  }}
+                >
+                  <span style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: expanded ? 20 : 24,
+                    flexShrink: 0,
+                  }}>
+                    <I d={s.railIconD} size={expanded ? 18 : 20} />
+                  </span>
+
+                  {/* Label — always visible */}
+                  <span style={{
+                    fontSize: expanded ? 13.5 : 9,
+                    fontWeight: (hasActivePage || isFlyoutActive) ? 600 : expanded ? 450 : 500,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    flex: expanded ? 1 : undefined,
+                    textAlign: expanded ? 'left' : 'center',
+                    lineHeight: expanded ? '18px' : '11px',
+                    color: (hasActivePage || isFlyoutActive) ? '#2563eb' : expanded ? '#1a1a1a' : '#64748b',
+                  }}>
+                    {s.label}
+                  </span>
+
+                  {/* Expand arrow — only in expanded (hamburger) mode */}
+                  {expanded && (
+                    <span style={{
+                      fontSize: 10, color: '#94a3b8',
+                      transform: isOpen ? 'rotate(90deg)' : 'none',
+                      transition: 'transform 0.2s',
+                      flexShrink: 0,
+                    }}>▶</span>
+                  )}
+                </button>
+
+                {/* ── Sub-items (only when expanded + section is open) ── */}
+                {expanded && isOpen && (
+                  <div style={{ paddingBottom: 4 }}>
+                    {s.items.map(item => {
+                      const isItemActive = pathname === item.href
+                      return (
+                        <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            padding: '8px 14px 8px 46px',
+                            background: isItemActive ? '#eef4ff' : 'transparent',
+                            color: isItemActive ? '#2563eb' : '#475569',
+                            fontSize: 13, fontWeight: isItemActive ? 600 : 400,
+                            transition: 'all 0.1s', cursor: 'pointer',
+                            borderLeft: isItemActive ? '3px solid #2563eb' : '3px solid transparent',
+                          }}>
+                            <span style={{ display: 'flex', opacity: isItemActive ? 1 : 0.5, flexShrink: 0 }}>
+                              <I d={item.iconD} size={15} />
+                            </span>
+                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                            {item.badge && (
+                              <span style={{
+                                background: isItemActive ? '#dbeafe' : '#f1f5f9',
+                                color: isItemActive ? '#2563eb' : '#94a3b8',
+                                padding: '1px 7px', borderRadius: 20,
+                                fontSize: 10, fontWeight: 600,
+                              }}>{item.badge}</span>
+                            )}
+                          </div>
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Divider between sections */}
+                {sIdx < sections.length - 1 && (
+                  <div style={{
+                    height: 1,
+                    background: '#f0efe8',
+                    margin: expanded ? '4px 14px' : '4px 12px',
+                  }} />
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Footer — only in expanded mode */}
+        {expanded && (
+          <div style={{
+            padding: '12px 16px', marginTop: 'auto',
+            borderTop: '1px solid #ebe8df',
+            background: '#f5f4ef',
+          }}>
+            <div style={{
+              fontSize: 10.5, color: '#b0ad9f',
+              textAlign: 'center', letterSpacing: '0.03em',
+            }}>
+              DataGuard v3.0
+            </div>
+          </div>
+        )}
+      </nav>
+
+      {/* ── Flyout panel (icon click when collapsed) ── */}
       <div
-        ref={panelRef}
+        ref={flyoutRef}
         style={{
           position: 'fixed',
           left: RAIL_W,
@@ -367,78 +522,82 @@ export default function Sidebar() {
           width: PANEL_W,
           background: '#fafaf5',
           borderRight: '1px solid #ebe8df',
-          boxShadow: panelOpen ? '6px 0 20px rgba(0,0,0,0.06)' : 'none',
-          transform: panelOpen ? 'translateX(0)' : `translateX(-${PANEL_W + 10}px)`,
+          boxShadow: flyoutSection ? '6px 0 20px rgba(0,0,0,0.06)' : 'none',
+          transform: flyoutSection ? 'translateX(0)' : `translateX(-${PANEL_W + 10}px)`,
           transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           zIndex: 54,
           display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
         }}
       >
-        {/* Section heading */}
-        <div style={{
-          padding: '18px 20px 14px',
-          borderBottom: '1px solid #ebe8df',
-        }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            color: '#1a1a1a', fontSize: 15, fontWeight: 700,
-            letterSpacing: '-0.3px',
-          }}>
-            <span style={{ color: '#2563eb', display: 'flex' }}>
-              <I d={currentSection.railIconD} size={16} />
-            </span>
-            {currentSection.label}
-          </div>
-        </div>
+        {flyoutSectionData && (
+          <>
+            {/* Section heading */}
+            <div style={{
+              padding: '18px 20px 14px',
+              borderBottom: '1px solid #ebe8df',
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                color: '#1a1a1a', fontSize: 15, fontWeight: 700,
+                letterSpacing: '-0.3px',
+              }}>
+                <span style={{ color: '#2563eb', display: 'flex' }}>
+                  <I d={flyoutSectionData.railIconD} size={16} />
+                </span>
+                {flyoutSectionData.label}
+              </div>
+            </div>
 
-        {/* Sub-items */}
-        <nav style={{ flex: 1, padding: '10px 10px', overflowY: 'auto' }}>
-          {currentSection.items.map(item => {
-            const isItemActive = pathname === item.href
-            return (
-              <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '10px 14px', borderRadius: 10, marginBottom: 3,
-                  background: isItemActive ? '#eef4ff' : 'transparent',
-                  color: isItemActive ? '#2563eb' : '#475569',
-                  fontSize: 13.5, fontWeight: isItemActive ? 600 : 450,
-                  transition: 'all 0.15s', cursor: 'pointer',
-                  borderLeft: isItemActive ? '2px solid #2563eb' : '2px solid transparent',
-                  paddingLeft: isItemActive ? '12px' : '14px',
-                }}>
-                  <span style={{ display: 'flex', opacity: isItemActive ? 1 : 0.6, flexShrink: 0 }}>
-                    <I d={item.iconD} size={16} />
-                  </span>
-                  <span style={{ flex: 1 }}>{item.label}</span>
-                  {item.badge && (
-                    <span style={{
-                      background: isItemActive ? '#dbeafe' : '#f1f5f9',
-                      color: isItemActive ? '#2563eb' : '#94a3b8',
-                      padding: '2px 8px', borderRadius: 20,
-                      fontSize: 10.5, fontWeight: 600, minWidth: 22, textAlign: 'center',
-                    }}>{item.badge}</span>
-                  )}
-                </div>
-              </Link>
-            )
-          })}
-        </nav>
+            {/* Sub-items */}
+            <nav style={{ flex: 1, padding: '10px 10px', overflowY: 'auto' }}>
+              {flyoutSectionData.items.map(item => {
+                const isItemActive = pathname === item.href
+                return (
+                  <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '10px 14px', borderRadius: 10, marginBottom: 3,
+                      background: isItemActive ? '#eef4ff' : 'transparent',
+                      color: isItemActive ? '#2563eb' : '#475569',
+                      fontSize: 13.5, fontWeight: isItemActive ? 600 : 450,
+                      transition: 'all 0.15s', cursor: 'pointer',
+                      borderLeft: isItemActive ? '2px solid #2563eb' : '2px solid transparent',
+                      paddingLeft: isItemActive ? '12px' : '14px',
+                    }}>
+                      <span style={{ display: 'flex', opacity: isItemActive ? 1 : 0.6, flexShrink: 0 }}>
+                        <I d={item.iconD} size={16} />
+                      </span>
+                      <span style={{ flex: 1 }}>{item.label}</span>
+                      {item.badge && (
+                        <span style={{
+                          background: isItemActive ? '#dbeafe' : '#f1f5f9',
+                          color: isItemActive ? '#2563eb' : '#94a3b8',
+                          padding: '2px 8px', borderRadius: 20,
+                          fontSize: 10.5, fontWeight: 600, minWidth: 22, textAlign: 'center',
+                        }}>{item.badge}</span>
+                      )}
+                    </div>
+                  </Link>
+                )
+              })}
+            </nav>
 
-        {/* Footer */}
-        <div style={{
-          padding: '12px 16px',
-          borderTop: '1px solid #ebe8df',
-          background: '#f5f4ef',
-        }}>
-          <div style={{
-            fontSize: 10.5, color: '#b0ad9f',
-            textAlign: 'center', letterSpacing: '0.03em',
-          }}>
-            DataGuard v3.0
-          </div>
-        </div>
+            {/* Footer */}
+            <div style={{
+              padding: '12px 16px',
+              borderTop: '1px solid #ebe8df',
+              background: '#f5f4ef',
+            }}>
+              <div style={{
+                fontSize: 10.5, color: '#b0ad9f',
+                textAlign: 'center', letterSpacing: '0.03em',
+              }}>
+                DataGuard v3.0
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </>
   )

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Rule, RuleCategory, RuleType, RuleStatus, Connection } from '@/lib/types'
 import { categoryColors } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
@@ -19,25 +19,17 @@ const CATEGORIES: { value: RuleCategory; label: string; icon: string }[] = [
 
 const RULE_TYPES: { value: RuleType; label: string; desc: string; category: RuleCategory }[] = [
   { value: 'null_check', label: 'Null Check', desc: 'Column must not have null values', category: 'completeness' },
-  { value: 'not_null', label: 'Not Null', desc: 'Column must not have null values', category: 'completeness' },
   { value: 'uniqueness_check', label: 'Uniqueness Check', desc: 'Values must be unique across rows', category: 'uniqueness' },
-  { value: 'unique', label: 'Unique', desc: 'Values must be unique', category: 'uniqueness' },
   { value: 'duplicate_check', label: 'Duplicate Check', desc: 'Detect duplicate records', category: 'uniqueness' },
   { value: 'accepted_values_check', label: 'Accepted Values', desc: 'Values must be in allowed set', category: 'validity' },
   { value: 'range_check', label: 'Range Check', desc: 'Values within min/max range', category: 'accuracy' },
-  { value: 'range', label: 'Range', desc: 'Values within min/max range', category: 'accuracy' },
   { value: 'freshness_check', label: 'Freshness Check', desc: 'Data updated within time window', category: 'timeliness' },
-  { value: 'freshness', label: 'Freshness', desc: 'Data updated within time window', category: 'timeliness' },
   { value: 'volume_check', label: 'Volume Check', desc: 'Row count within expected bounds', category: 'completeness' },
-  { value: 'row_count', label: 'Row Count', desc: 'Table has minimum row count', category: 'completeness' },
   { value: 'schema_drift_check', label: 'Schema Drift', desc: 'Detect unexpected schema changes', category: 'consistency' },
   { value: 'referential_integrity_check', label: 'Referential Integrity', desc: 'FK references exist in target', category: 'consistency' },
-  { value: 'referential', label: 'Referential', desc: 'Referential integrity check', category: 'consistency' },
   { value: 'regex_check', label: 'Regex Pattern', desc: 'Values match a regex pattern', category: 'validity' },
-  { value: 'regex', label: 'Regex', desc: 'Values match a regex pattern', category: 'validity' },
   { value: 'business_rule_check', label: 'Business Rule', desc: 'Custom business logic condition', category: 'accuracy' },
   { value: 'custom_sql_check', label: 'Custom SQL', desc: 'Custom SQL expression check', category: 'accuracy' },
-  { value: 'custom_sql', label: 'Custom SQL', desc: 'Custom SQL expression check', category: 'accuracy' },
   { value: 'semantic_consistency_check', label: 'Semantic Consistency', desc: 'Cross-column logical consistency', category: 'consistency' },
   { value: 'referential_sanity_check', label: 'Referential Sanity', desc: 'Validate referential data sanity', category: 'consistency' },
   { value: 'business_metric_check', label: 'Business Metric', desc: 'Aggregate metric within bounds', category: 'accuracy' },
@@ -74,6 +66,14 @@ interface Props { initialRules: Rule[]; connections: Connection[] }
 
 export default function RulesClient({ initialRules, connections }: Props) {
   const [rules, setRules] = useState(initialRules)
+
+  // Sync when parent provides new data (async load)
+  useEffect(() => {
+    if (initialRules.length > 0 && rules.length === 0) {
+      setRules(initialRules)
+    }
+  }, [initialRules]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [showModal, setShowModal] = useState(false)
   const [editDrawer, setEditDrawer] = useState<Rule | null>(null)
   const [saving, setSaving] = useState(false)
@@ -92,6 +92,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   // Create form
   const [form, setForm] = useState({
@@ -110,6 +111,75 @@ export default function RulesClient({ initialRules, connections }: Props) {
 
   // Edit form
   const [editForm, setEditForm] = useState<typeof form | null>(null)
+
+  // Table & Column dropdown data
+  const [availableTables, setAvailableTables] = useState<string[]>([])
+  const [availableColumns, setAvailableColumns] = useState<string[]>([])
+  const [tablesLoading, setTablesLoading] = useState(false)
+  const [columnsLoading, setColumnsLoading] = useState(false)
+
+  // Known schema fallback (for Cloudflare / when Snowflake SDK is unavailable)
+  const KNOWN_COLUMNS: Record<string, string[]> = {
+    CARRIERS: ['CARRIER_ID','CARRIER_NAME','CONTACT_NAME','PHONE','EMAIL','TRACKING_URL','CREATED_AT','UPDATED_AT'],
+    CUSTOMERS: ['CUSTOMER_ID','FIRST_NAME','LAST_NAME','EMAIL','PHONE','ADDRESS','CITY','STATE','ZIP_CODE','COUNTRY','CUSTOMER_SEGMENT','CREDIT_LIMIT','CREATED_AT','UPDATED_AT'],
+    FINANCE_TRANSACTIONS: ['TRANSACTION_ID','ORDER_ID','TRANSACTION_TYPE','AMOUNT','CURRENCY','PAYMENT_METHOD','TRANSACTION_DATE','STATUS','REFERENCE_NUMBER','NOTES','CREATED_AT','UPDATED_AT'],
+    INVENTORY: ['INVENTORY_ID','PRODUCT_ID','WAREHOUSE_ID','QUANTITY_ON_HAND','REORDER_LEVEL','LAST_RESTOCK_DATE','CREATED_AT','UPDATED_AT'],
+    PRODUCTS: ['PRODUCT_ID','PRODUCT_NAME','SKU','CATEGORY_ID','UNIT_PRICE','UNIT_COST','WEIGHT','DESCRIPTION','CREATED_AT','UPDATED_AT'],
+    PRODUCT_CATEGORIES: ['CATEGORY_ID','CATEGORY_NAME','DESCRIPTION','PARENT_CATEGORY_ID','CREATED_AT'],
+    PURCHASE_ORDERS: ['PO_ID','SUPPLIER_ID','ORDER_DATE','EXPECTED_DELIVERY','STATUS','TOTAL_AMOUNT','NOTES','CREATED_AT','UPDATED_AT'],
+    PURCHASE_ORDER_ITEMS: ['PO_ITEM_ID','PO_ID','PRODUCT_ID','QUANTITY','UNIT_PRICE','TOTAL_PRICE'],
+    RETURNS: ['RETURN_ID','ORDER_ID','CUSTOMER_ID','RETURN_DATE','REASON','STATUS','REFUND_AMOUNT','CREATED_AT'],
+    SALES_ORDERS: ['ORDER_ID','ORDER_NUMBER','CUSTOMER_ID','ORDER_DATE','SHIPPED_DATE','DELIVERED_DATE','STATUS','SHIPPING_METHOD','WAREHOUSE_ID','TOTAL_AMOUNT','DISCOUNT_AMOUNT','TAX_AMOUNT','NET_AMOUNT','CREATED_AT','UPDATED_AT'],
+    SUPPLIERS: ['SUPPLIER_ID','SUPPLIER_NAME','CONTACT_NAME','EMAIL','PHONE','ADDRESS','CITY','COUNTRY','RATING','CREATED_AT','UPDATED_AT'],
+    WAREHOUSES: ['WAREHOUSE_ID','WAREHOUSE_NAME','LOCATION','CITY','STATE','COUNTRY','CAPACITY','MANAGER','CREATED_AT','UPDATED_AT'],
+  }
+
+  const fetchTables = useCallback(async () => {
+    setTablesLoading(true)
+    try {
+      const res = await fetch('/api/snowflake/tables')
+      const data = await res.json()
+      const tables = (data.tables || []).map((t: { name?: string; TABLE_NAME?: string }) => t.name || t.TABLE_NAME || '').filter(Boolean)
+      if (tables.length > 0) { setAvailableTables(tables.sort()); setTablesLoading(false); return }
+    } catch { /* fall through to fallback */ }
+    // Fallback: use known schema tables
+    setAvailableTables(Object.keys(KNOWN_COLUMNS).sort())
+    setTablesLoading(false)
+  }, [])
+
+  const fetchColumns = useCallback(async (table: string) => {
+    if (!table || table === 'ALL_TABLES') { setAvailableColumns([]); return }
+    setColumnsLoading(true)
+    try {
+      const res = await fetch(`/api/snowflake/columns?table=${encodeURIComponent(table)}`)
+      const data = await res.json()
+      const cols = (data.columns || []).map((c: { name?: string; COLUMN_NAME?: string }) => c.name || c.COLUMN_NAME || '').filter(Boolean)
+      if (cols.length > 0) { setAvailableColumns(cols.sort()); setColumnsLoading(false); return }
+    } catch { /* fall through to fallback */ }
+    // Fallback: use known schema columns
+    const known = KNOWN_COLUMNS[table.toUpperCase()] || []
+    setAvailableColumns(known)
+    setColumnsLoading(false)
+  }, [])
+
+  // Fetch tables when modal opens
+  useEffect(() => {
+    if (showModal) fetchTables()
+  }, [showModal, fetchTables])
+
+  // Fetch columns when selected table changes (create form)
+  useEffect(() => {
+    if (showModal && form.tableName) fetchColumns(form.tableName)
+    else setAvailableColumns([])
+  }, [showModal, form.tableName, fetchColumns])
+
+  // Fetch tables & columns when edit drawer opens
+  useEffect(() => {
+    if (editDrawer) {
+      fetchTables()
+      if (editDrawer.tableName) fetchColumns(editDrawer.tableName)
+    }
+  }, [editDrawer, fetchTables, fetchColumns])
 
   /* ── Derived data ─────────────────────────────────────────────── */
 
@@ -130,7 +200,19 @@ export default function RulesClient({ initialRules, connections }: Props) {
       result = result.filter(r => r.name.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q) || r.tableName.toLowerCase().includes(q))
     }
     return result
-  }, [rules, activeCategory, statusFilter, severityFilter, tableFilter, search])
+  }, [rules, activeCategory, statusFilter, severityFilter, tableFilter, search, scopeFilter])
+
+  // Group filtered rules by type
+  const grouped = useMemo(() => {
+    const map = new Map<string, Rule[]>()
+    for (const r of filtered) {
+      const key = r.type
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(r)
+    }
+    // Sort groups: most rules first
+    return Array.from(map.entries()).sort((a, b) => b[1].length - a[1].length)
+  }, [filtered])
 
   const categoryCounts = CATEGORIES.reduce((acc, cat) => {
     acc[cat.value] = rules.filter(r => r.category === cat.value).length; return acc
@@ -370,8 +452,8 @@ export default function RulesClient({ initialRules, connections }: Props) {
         </select>
         <select value={scopeFilter} onChange={e => setScopeFilter(e.target.value as typeof scopeFilter)} style={{ ...inp(), width: 'auto', minWidth: '150px' }}>
           <option value="all">All Scopes</option>
-          <option value="generic">🔧 Generic</option>
-          <option value="object-specific">🎯 Object-Specific</option>
+          <option value="generic">🔧 DQ Rule</option>
+          <option value="object-specific">🎯 Business Rule</option>
         </select>
         {activeFilterCount > 0 && (
           <button onClick={() => { setActiveCategory('all'); setStatusFilter('all'); setSeverityFilter('all'); setTableFilter(''); setScopeFilter('all'); setSearch('') }}
@@ -418,117 +500,207 @@ export default function RulesClient({ initialRules, connections }: Props) {
         </div>
       )}
 
-      {/* Rules Table */}
+      {/* Rules Table — Grouped by Type */}
       <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #ebe8df', overflow: 'hidden' }}>
         {/* Table Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '36px 1fr 110px 70px 100px 100px 100px 100px 80px', gap: '6px', padding: '10px 16px', borderBottom: '1px solid #f3f1ea', background: '#fafaf9' }}>
-          <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', borderBottom: '1px solid #f3f1ea', background: '#fafaf9' }}>
+          <div style={{ width: '32px', display: 'flex', alignItems: 'center' }}>
             <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#E8541A' }} />
           </div>
-          {['Rule', 'Type', 'Scope', 'Severity', 'Status', 'Table', 'Last Run', 'Actions'].map(h => (
-            <div key={h} style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{h}</div>
-          ))}
+          <div style={{ flex: 1, fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Rule Type / Tables</div>
+          <div style={{ width: '80px', fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Category</div>
+          <div style={{ width: '70px', fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Scope</div>
+          <div style={{ width: '60px', fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Count</div>
+          <div style={{ width: '80px', fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status</div>
+          <div style={{ width: '60px' }} />
         </div>
 
-        {/* Rules Rows */}
-        {filtered.map(rule => {
-          const cat = CATEGORIES.find(c => c.value === rule.category)
-          const sev = SEVERITY_CONFIG[rule.severity]
-          const stat = STATUS_CONFIG[rule.status || (rule.enabled ? 'active' : 'disabled')]
-          const conn = connections.find(c => c.id === rule.connectionId)
-          const isRunning = testing === rule.id
-          const result = testResults[rule.id]
+        {/* Grouped Rules */}
+        {grouped.map(([type, groupRules]) => {
+          const isExpanded = expandedGroups.has(type)
+          const cat = CATEGORIES.find(c => c.value === groupRules[0].category)
+          const ruleTypeDef = RULE_TYPES.find(t => t.value === type)
+          const activeCount = groupRules.filter(r => r.status === 'active' || r.enabled).length
+          const allGroupSelected = groupRules.every(r => selectedIds.has(r.id))
+          const someGroupSelected = groupRules.some(r => selectedIds.has(r.id))
+          const scopes = new Set(groupRules.map(r => r.scope || 'generic'))
+          const tables = [...new Set(groupRules.map(r => r.tableName))].sort()
+          const passedCount = groupRules.filter(r => r.lastRunStatus === 'passed' || testResults[r.id]?.status === 'passed').length
+          const failedCount = groupRules.filter(r => r.lastRunStatus === 'failed' || testResults[r.id]?.status === 'failed').length
+
+          function toggleGroupSelect() {
+            setSelectedIds(prev => {
+              const s = new Set(prev)
+              if (allGroupSelected) groupRules.forEach(r => s.delete(r.id))
+              else groupRules.forEach(r => s.add(r.id))
+              return s
+            })
+          }
+
           return (
-            <div key={rule.id} style={{
-              display: 'grid', gridTemplateColumns: '36px 1fr 110px 70px 100px 100px 100px 100px 80px', gap: '6px',
-              padding: '12px 16px', borderBottom: '1px solid #f8f6f0', alignItems: 'center',
-              opacity: rule.status === 'archived' || rule.status === 'disabled' ? 0.6 : 1,
-              background: selectedIds.has(rule.id) ? '#f0f9ff' : '#fff',
-              transition: 'background 0.15s',
-            }}>
-              {/* Checkbox */}
-              <div><input type="checkbox" checked={selectedIds.has(rule.id)} onChange={() => toggleSelect(rule.id)} style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#E8541A' }} /></div>
-
-              {/* Rule Info */}
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
-                  <span style={{ fontSize: '16px' }}>{cat?.icon}</span>
-                  <span style={{ fontWeight: 600, fontSize: '13px', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rule.name}</span>
+            <div key={type}>
+              {/* Group Header Row */}
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  padding: '12px 16px', borderBottom: '1px solid #f3f1ea',
+                  background: isExpanded ? '#f8fafc' : '#fff',
+                  cursor: 'pointer', transition: 'background 0.15s',
+                }}
+              >
+                <div style={{ width: '32px', display: 'flex', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+                  <input type="checkbox" checked={allGroupSelected} ref={el => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected }}
+                    onChange={toggleGroupSelect}
+                    style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#E8541A' }} />
                 </div>
-                <div style={{ fontSize: '11.5px', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {rule.description || 'No description'} · {conn?.name || 'Unknown'}
+
+                <div style={{ flex: 1, minWidth: 0 }} onClick={() => setExpandedGroups(prev => {
+                  const s = new Set(prev); if (s.has(type)) s.delete(type); else s.add(type); return s
+                })}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(90deg)' : 'none', display: 'inline-block' }}>▶</span>
+                    <span style={{ fontSize: '16px' }}>{cat?.icon}</span>
+                    <span style={{ fontWeight: 700, fontSize: '13.5px', color: '#1a1a1a' }}>
+                      {ruleTypeDef?.label || fmtType(type)}
+                    </span>
+                    <span style={{ padding: '2px 8px', borderRadius: '10px', background: '#f1f5f9', color: '#475569', fontSize: '11px', fontWeight: 600 }}>
+                      {groupRules.length} rule{groupRules.length > 1 ? 's' : ''}
+                    </span>
+                    {passedCount > 0 && <span style={{ padding: '2px 6px', borderRadius: '10px', background: '#dcfce7', color: '#16a34a', fontSize: '10px', fontWeight: 600 }}>✓ {passedCount}</span>}
+                    {failedCount > 0 && <span style={{ padding: '2px 6px', borderRadius: '10px', background: '#fee2e2', color: '#dc2626', fontSize: '10px', fontWeight: 600 }}>✗ {failedCount}</span>}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginLeft: '26px' }}>
+                    {ruleTypeDef?.desc || ''} · <span style={{ color: '#64748b' }}>
+                      {tables.length <= 3
+                        ? tables.map(t => t === 'ALL_TABLES' ? 'All Tables' : t).join(', ')
+                        : `${tables.slice(0, 2).join(', ')} +${tables.length - 2} more`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Category */}
+                <div style={{ width: '80px' }}>
+                  <span style={{
+                    padding: '3px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 600,
+                    background: categoryColors[groupRules[0].category] + '18',
+                    color: categoryColors[groupRules[0].category],
+                  }}>{cat?.label}</span>
+                </div>
+
+                {/* Scope */}
+                <div style={{ width: '70px' }}>
+                  {scopes.has('generic') && <span style={{ padding: '2px 5px', borderRadius: '4px', background: '#f0f9ff', color: '#0369a1', fontSize: '9px', fontWeight: 600, marginRight: '2px' }}>🔧</span>}
+                  {scopes.has('object-specific') && <span style={{ padding: '2px 5px', borderRadius: '4px', background: '#faf5ff', color: '#7c3aed', fontSize: '9px', fontWeight: 600 }}>🎯</span>}
+                </div>
+
+                {/* Count */}
+                <div style={{ width: '60px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#16a34a' }}>{activeCount}</span>
+                  <span style={{ fontSize: '11px', color: '#cbd5e1' }}> / {groupRules.length}</span>
+                </div>
+
+                {/* Status summary */}
+                <div style={{ width: '80px' }}>
+                  {activeCount === groupRules.length ? (
+                    <span style={{ padding: '3px 8px', borderRadius: '20px', background: '#dcfce7', color: '#16a34a', fontSize: '10px', fontWeight: 600 }}>All Active</span>
+                  ) : (
+                    <span style={{ padding: '3px 8px', borderRadius: '20px', background: '#fef3c7', color: '#d97706', fontSize: '10px', fontWeight: 600 }}>Mixed</span>
+                  )}
+                </div>
+
+                {/* Expand/Actions */}
+                <div style={{ width: '60px', display: 'flex', gap: '4px' }}>
+                  <button onClick={(e) => { e.stopPropagation(); groupRules.forEach(r => testRule(r.id)) }}
+                    style={{ padding: '4px 6px', borderRadius: '6px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '11px', cursor: 'pointer' }}>▶ All</button>
                 </div>
               </div>
 
-              {/* Type */}
-              <div>
-                <span style={{ padding: '3px 8px', borderRadius: '6px', background: '#f1f5f9', color: '#475569', fontSize: '10.5px', fontWeight: 500 }}>
-                  {fmtType(rule.type)}
-                </span>
-              </div>
+              {/* Expanded: Individual Rules */}
+              {isExpanded && (
+                <div style={{ background: '#fafaf9' }}>
+                  {groupRules.map(rule => {
+                    const sev = SEVERITY_CONFIG[rule.severity]
+                    const stat = STATUS_CONFIG[rule.status || (rule.enabled ? 'active' : 'disabled')]
+                    const conn = connections.find(c => c.id === rule.connectionId)
+                    const isRunning = testing === rule.id
+                    const result = testResults[rule.id]
+                    return (
+                      <div key={rule.id} style={{
+                        display: 'flex', alignItems: 'center', gap: '6px',
+                        padding: '9px 16px 9px 50px', borderBottom: '1px solid #f0efe8',
+                        background: selectedIds.has(rule.id) ? '#eef6ff' : 'transparent',
+                        transition: 'background 0.15s',
+                      }}>
+                        <div style={{ width: '32px' }}>
+                          <input type="checkbox" checked={selectedIds.has(rule.id)} onChange={() => toggleSelect(rule.id)} style={{ width: '13px', height: '13px', cursor: 'pointer', accentColor: '#E8541A' }} />
+                        </div>
 
-              {/* Scope */}
-              <div>
-                {(rule.scope || 'generic') === 'generic' ? (
-                  <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#f0f9ff', color: '#0369a1', fontSize: '9.5px', fontWeight: 600 }}>🔧</span>
-                ) : (
-                  <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#faf5ff', color: '#7c3aed', fontSize: '9.5px', fontWeight: 600 }}>🎯</span>
-                )}
-              </div>
+                        {/* Table.Column target */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {rule.tableName === 'ALL_TABLES' ? (
+                              <span style={{ fontSize: '10px', color: '#0369a1', fontWeight: 600, background: '#dbeafe', padding: '2px 8px', borderRadius: '4px' }}>All Tables</span>
+                            ) : (
+                              <span style={{ fontSize: '12px', color: '#1a1a1a', fontFamily: 'monospace', fontWeight: 500 }}>
+                                {rule.tableName}{rule.columnName ? <span style={{ color: '#E8541A' }}>.{rule.columnName}</span> : ''}
+                              </span>
+                            )}
+                            <span style={{ fontSize: '11px', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {rule.description ? `— ${rule.description}` : ''}
+                            </span>
+                          </div>
+                        </div>
 
-              {/* Severity */}
-              <div>
-                <span style={{ background: sev.bg, color: sev.color, padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600 }}>{sev.label}</span>
-              </div>
+                        {/* Severity */}
+                        <div style={{ width: '75px' }}>
+                          <span style={{ background: sev.bg, color: sev.color, padding: '2px 6px', borderRadius: '12px', fontSize: '9.5px', fontWeight: 600 }}>{sev.label}</span>
+                        </div>
 
-              {/* Status with dropdown */}
-              <div style={{ position: 'relative' }}>
-                <StatusDropdown rule={rule} stat={stat} onUpdate={updateRuleStatus} />
-              </div>
+                        {/* Status */}
+                        <div style={{ width: '90px' }}>
+                          <StatusDropdown rule={rule} stat={stat} onUpdate={updateRuleStatus} />
+                        </div>
 
-              {/* Table */}
-              <div>
-                {rule.tableName === 'ALL_TABLES' ? (
-                  <span style={{ fontSize: '10px', color: '#0369a1', fontWeight: 600, background: '#dbeafe', padding: '2px 6px', borderRadius: '4px' }}>All Tables</span>
-                ) : (
-                  <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>{rule.tableName}{rule.columnName ? `.${rule.columnName}` : ''}</span>
-                )}
-              </div>
+                        {/* Connection */}
+                        <div style={{ width: '80px' }}>
+                          <span style={{ fontSize: '10px', color: '#94a3b8' }}>{conn?.name || '—'}</span>
+                        </div>
 
-              {/* Last Run */}
-              <div>
-                {isRunning ? (
-                  <span style={{ fontSize: '11px', color: '#2563eb', fontWeight: 500 }}>⏳ Running...</span>
-                ) : result ? (
-                  <span style={{
-                    padding: '2px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600,
-                    background: result.status === 'passed' ? '#dcfce7' : '#fee2e2',
-                    color: result.status === 'passed' ? '#16a34a' : '#dc2626'
-                  }}>
-                    {result.status === 'passed' ? '✓' : '✗'} {result.score}%
-                  </span>
-                ) : rule.lastRunStatus ? (
-                  <span style={{
-                    padding: '2px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 600,
-                    background: rule.lastRunStatus === 'passed' ? '#dcfce7' : '#fee2e2',
-                    color: rule.lastRunStatus === 'passed' ? '#16a34a' : '#dc2626'
-                  }}>
-                    {rule.lastRunStatus === 'passed' ? '✓' : '✗'} {rule.lastRunScore}%
-                  </span>
-                ) : (
-                  <span style={{ fontSize: '11px', color: '#cbd5e1' }}>—</span>
-                )}
-              </div>
+                        {/* Last Run */}
+                        <div style={{ width: '70px' }}>
+                          {isRunning ? (
+                            <span style={{ fontSize: '10px', color: '#2563eb', fontWeight: 500 }}>⏳ Running</span>
+                          ) : result ? (
+                            <span style={{
+                              padding: '2px 6px', borderRadius: '12px', fontSize: '10px', fontWeight: 600,
+                              background: result.status === 'passed' ? '#dcfce7' : '#fee2e2',
+                              color: result.status === 'passed' ? '#16a34a' : '#dc2626'
+                            }}>{result.status === 'passed' ? '✓' : '✗'} {result.score}%</span>
+                          ) : rule.lastRunStatus ? (
+                            <span style={{
+                              padding: '2px 6px', borderRadius: '12px', fontSize: '10px', fontWeight: 600,
+                              background: rule.lastRunStatus === 'passed' ? '#dcfce7' : '#fee2e2',
+                              color: rule.lastRunStatus === 'passed' ? '#16a34a' : '#dc2626'
+                            }}>{rule.lastRunStatus === 'passed' ? '✓' : '✗'} {rule.lastRunScore}%</span>
+                          ) : (
+                            <span style={{ fontSize: '10px', color: '#cbd5e1' }}>—</span>
+                          )}
+                        </div>
 
-              {/* Actions */}
-              <div style={{ display: 'flex', gap: '4px' }}>
-                <button onClick={() => testRule(rule.id)} disabled={isRunning} title="Test rule"
-                  style={{ padding: '5px 7px', borderRadius: '6px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '12px', cursor: 'pointer' }}>▶</button>
-                <button onClick={() => openEdit(rule)} title="Edit rule"
-                  style={{ padding: '5px 7px', borderRadius: '6px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '12px', cursor: 'pointer' }}>✏</button>
-                <button onClick={() => deleteRule(rule.id)} title="Delete rule"
-                  style={{ padding: '5px 7px', borderRadius: '6px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '12px', cursor: 'pointer' }}>🗑</button>
-              </div>
+                        {/* Actions */}
+                        <div style={{ width: '80px', display: 'flex', gap: '3px' }}>
+                          <button onClick={() => testRule(rule.id)} disabled={isRunning}
+                            style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '11px', cursor: 'pointer' }}>▶</button>
+                          <button onClick={() => openEdit(rule)}
+                            style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '11px', cursor: 'pointer' }}>✏</button>
+                          <button onClick={() => deleteRule(rule.id)}
+                            style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '11px', cursor: 'pointer' }}>🗑</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })}
@@ -547,7 +719,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
         {/* Summary Footer */}
         {filtered.length > 0 && (
           <div style={{ padding: '10px 16px', background: '#fafaf9', borderTop: '1px solid #f3f1ea', fontSize: '12px', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Showing {filtered.length} of {rules.length} rules</span>
+            <span>Showing {filtered.length} rules in {grouped.length} groups · {rules.length} total</span>
             <span>{rules.filter(r => r.status === 'active' || r.enabled).length} active · {rules.filter(r => r.status === 'pending_review').length} pending review</span>
           </div>
         )}
@@ -594,14 +766,14 @@ export default function RulesClient({ initialRules, connections }: Props) {
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Rule Scope *</label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <button type="button" onClick={() => setForm(f => ({ ...f, scope: 'generic' }))} style={{
+                  <button type="button" onClick={() => setForm(f => ({ ...f, scope: 'generic', tableName: 'ALL_TABLES', columnName: '' }))} style={{
                     padding: '12px 10px', borderRadius: '10px', cursor: 'pointer', textAlign: 'left',
                     border: form.scope === 'generic' ? '2px solid #0369a1' : '1px solid #e2e8f0',
                     background: form.scope === 'generic' ? '#f0f9ff' : '#fafaf9',
                   }}>
                     <div style={{ fontSize: '15px', marginBottom: '4px' }}>🔧</div>
-                    <div style={{ fontSize: '12px', fontWeight: form.scope === 'generic' ? 700 : 500, color: form.scope === 'generic' ? '#0369a1' : '#475569' }}>Generic Rule</div>
-                    <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>Applies across all tables in the schema. No specific table required.</div>
+                    <div style={{ fontSize: '12px', fontWeight: form.scope === 'generic' ? 700 : 500, color: form.scope === 'generic' ? '#0369a1' : '#475569' }}>DQ Rule</div>
+                    <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>Applies across all tables in the connection.</div>
                   </button>
                   <button type="button" onClick={() => setForm(f => ({ ...f, scope: 'object-specific' }))} style={{
                     padding: '12px 10px', borderRadius: '10px', cursor: 'pointer', textAlign: 'left',
@@ -609,7 +781,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
                     background: form.scope === 'object-specific' ? '#faf5ff' : '#fafaf9',
                   }}>
                     <div style={{ fontSize: '15px', marginBottom: '4px' }}>🎯</div>
-                    <div style={{ fontSize: '12px', fontWeight: form.scope === 'object-specific' ? 700 : 500, color: form.scope === 'object-specific' ? '#7c3aed' : '#475569' }}>Object-Specific Rule</div>
+                    <div style={{ fontSize: '12px', fontWeight: form.scope === 'object-specific' ? 700 : 500, color: form.scope === 'object-specific' ? '#7c3aed' : '#475569' }}>Business Rule</div>
                     <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }}>Targets a specific table and/or column.</div>
                   </button>
                 </div>
@@ -622,6 +794,56 @@ export default function RulesClient({ initialRules, connections }: Props) {
                     {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
+              </div>
+
+              {!isGeneric && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>
+                    Table *
+                  </label>
+                  <select value={form.tableName} onChange={e => { setForm(f => ({ ...f, tableName: e.target.value, columnName: '' })); setAvailableColumns([]) }}
+                    style={inp()}>
+                    <option value="">{tablesLoading ? 'Loading tables...' : '— Select Table —'}</option>
+                    {availableTables.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Column</label>
+                  <select value={form.columnName} onChange={e => setForm(f => ({ ...f, columnName: e.target.value }))}
+                    disabled={!form.tableName || columnsLoading}
+                    style={inp(!form.tableName ? { opacity: 0.6 } : {})}>
+                    <option value="">{columnsLoading ? 'Loading columns...' : !form.tableName ? '— Select table first —' : '— Select Column —'}</option>
+                    {availableColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              )}
+
+              {isGeneric && availableTables.length > 0 && (
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>
+                    Tables Selected <span style={{ fontSize: '10px', color: '#0369a1', marginLeft: '4px' }}>All {availableTables.length} tables</span>
+                  </label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '10px 12px', background: '#f0f9ff', borderRadius: '8px', border: '1px solid #bae6fd', maxHeight: '120px', overflowY: 'auto' }}>
+                    {availableTables.map(t => (
+                      <span key={t} style={{ background: '#dbeafe', color: '#1e40af', padding: '3px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 500, fontFamily: 'monospace' }}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Dynamic Config Fields */}
+              {renderConfigFields(form, (k, v) => setForm(f => ({ ...f, [k]: v })), inp)}
+
+              {/* Severity & Status */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Severity</label>
+                  <select value={form.severity} onChange={e => setForm(f => ({ ...f, severity: e.target.value as Rule['severity'] }))} style={inp()}>
+                    {Object.entries(SEVERITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
                 <div>
                   <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Status</label>
                   <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as RuleStatus }))} style={inp()}>
@@ -630,40 +852,33 @@ export default function RulesClient({ initialRules, connections }: Props) {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>
-                    Table {isGeneric ? '' : '*'}
-                    {isGeneric && <span style={{ fontSize: '10px', color: '#0369a1', marginLeft: '6px' }}>(optional — applies to all tables)</span>}
-                  </label>
-                  <input value={form.tableName} onChange={e => setForm(f => ({ ...f, tableName: e.target.value }))}
-                    placeholder={isGeneric ? 'Leave empty for all tables' : 'e.g. CUSTOMERS'}
-                    style={inp(isGeneric ? { background: '#f0f9ff', borderColor: '#bae6fd' } : {})} />
-                </div>
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Column</label>
-                  <input value={form.columnName} onChange={e => setForm(f => ({ ...f, columnName: e.target.value }))}
-                    placeholder={isGeneric ? 'optional' : 'e.g. EMAIL'} style={inp()} />
-                </div>
-              </div>
-
-              {/* Dynamic Config Fields */}
-              {renderConfigFields(form, (k, v) => setForm(f => ({ ...f, [k]: v })), inp)}
-
-              {/* Severity */}
+              {/* Custom SQL */}
               <div>
-                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Severity</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                  {(Object.keys(SEVERITY_CONFIG) as Rule['severity'][]).map(sev => (
-                    <button key={sev} onClick={() => setForm(f => ({ ...f, severity: sev }))} style={{
-                      padding: '7px', borderRadius: '8px', border: '1px solid', fontSize: '11.5px', fontWeight: 500, cursor: 'pointer',
-                      background: form.severity === sev ? SEVERITY_CONFIG[sev].bg : '#fff',
-                      color: form.severity === sev ? SEVERITY_CONFIG[sev].color : '#64748b',
-                      borderColor: form.severity === sev ? SEVERITY_CONFIG[sev].color : '#e2e8f0'
-                    }}>{SEVERITY_CONFIG[sev].label}</button>
-                  ))}
-                </div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Custom SQL (blank = auto-generate)</label>
+                <textarea value={form.customSql} onChange={e => setForm(f => ({ ...f, customSql: e.target.value }))} rows={4}
+                  placeholder="SELECT COUNT(*) AS failed_count FROM ..."
+                  style={{ ...inp(), fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' as const }} />
               </div>
+
+              {/* Target preview */}
+              {(form.tableName || form.connectionId) && (
+                <div style={{ padding: '12px', background: '#fafaf9', borderRadius: '8px', border: '1px solid #ebe8df' }}>
+                  <div style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Target</div>
+                  <div style={{ fontSize: '12px', color: '#475569' }}>
+                    {form.tableName ? (
+                      <>
+                        <span style={{ fontFamily: 'monospace' }}>{form.tableName}{form.columnName ? `.${form.columnName}` : ''}</span>
+                        <span style={{ color: '#94a3b8' }}> · {connections.find(c => c.id === form.connectionId)?.name || 'Unknown'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontFamily: 'monospace', color: '#0369a1' }}>All Tables</span>
+                        <span style={{ color: '#94a3b8' }}> · {connections.find(c => c.id === form.connectionId)?.name || 'Unknown'}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: '10px', paddingTop: '6px' }}>
                 <button onClick={() => setShowModal(false)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>

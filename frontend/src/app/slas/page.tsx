@@ -110,13 +110,34 @@ function MiniTrend({ data, color }: { data: number[]; color: string }) {
 export default function SLAsPage() {
   const [filter, setFilter]     = useState<FilterType>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [allSlas, setAllSlas] = useState(slas)
+  const [showAdd, setShowAdd] = useState(false)
+  const [sForm, setSForm] = useState({ name: '', dataset: '', type: 'Freshness', target: '', owner: '', domain: 'Finance', connection: 'SF_Codex' })
 
-  const overall  = Math.round(slas.reduce((acc, s) => acc + s.adherence, 0) / slas.length)
-  const healthy  = slas.filter(s => s.status === 'healthy').length
-  const atRisk   = slas.filter(s => s.status === 'at-risk').length
-  const breached = slas.filter(s => s.status === 'breached').length
+  const addSla = () => {
+    if (!sForm.name) return
+    const ns: SLA = {
+      id: `s${Date.now()}`, name: sForm.name, dataset: sForm.dataset,
+      type: sForm.type, target: sForm.target, current: 'Pending',
+      adherence: 100, status: 'healthy', owner: sForm.owner || 'Unassigned',
+      connection: sForm.connection, domain: sForm.domain, breaches: 0,
+      trend: [100, 100, 100, 100, 100, 100, 100],
+      rootCause: 'No issues yet — newly created SLA.',
+      impact: 'No impact — monitoring has not started.',
+      recommendation: 'Configure monitoring and set up alerting thresholds.',
+      affectedPipelines: [], nextReview: '2026-06-15',
+    }
+    setAllSlas(prev => [ns, ...prev])
+    setShowAdd(false)
+    setSForm({ name: '', dataset: '', type: 'Freshness', target: '', owner: '', domain: 'Finance', connection: 'SF_Codex' })
+  }
 
-  const filtered = slas.filter(s => filter === 'all' || s.status === filter)
+  const overall  = Math.round(allSlas.reduce((acc, s) => acc + s.adherence, 0) / allSlas.length)
+  const healthy  = allSlas.filter(s => s.status === 'healthy').length
+  const atRisk   = allSlas.filter(s => s.status === 'at-risk').length
+  const breached = allSlas.filter(s => s.status === 'breached').length
+
+  const filtered = allSlas.filter(s => filter === 'all' || s.status === filter)
 
   const statCards = [
     { key: 'all'      as FilterType, label: 'Overall Adherence', value: overall + '%', icon: '📊', color: overall >= 90 ? '#16a34a' : '#ea580c', activeBg: '#475569' },
@@ -139,7 +160,7 @@ export default function SLAsPage() {
             {breached > 0 && <span style={{ color: '#dc2626', fontWeight: 600 }}> · {breached} SLA{breached > 1 ? 's' : ''} breached</span>}
           </p>
         </div>
-        <button style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>
+        <button onClick={() => setShowAdd(true)} style={{ background: '#E8541A', border: 'none', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
           + New SLA
         </button>
       </div>
@@ -352,6 +373,62 @@ export default function SLAsPage() {
           )
         })}
       </div>
+
+      {/* New SLA Modal */}
+      {showAdd && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }} onClick={() => setShowAdd(false)} />
+          <div style={{ background: '#fff', borderRadius: '14px', width: '520px', maxHeight: '85vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', position: 'relative', zIndex: 1 }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #ebe8df' }}>
+              <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>New SLA</div>
+              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Define a service-level agreement for a data asset</div>
+            </div>
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>SLA Name *</label>
+                <input value={sForm.name} onChange={e => setSForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Orders Freshness" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Dataset *</label>
+                  <input value={sForm.dataset} onChange={e => setSForm(f => ({ ...f, dataset: e.target.value }))} placeholder="e.g. fact_orders" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Type</label>
+                  <select value={sForm.type} onChange={e => setSForm(f => ({ ...f, type: e.target.value }))} style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none' }}>
+                    {['Freshness', 'Quality Score', 'Accuracy', 'Completeness', 'Validity', 'Volume'].map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Target *</label>
+                <input value={sForm.target} onChange={e => setSForm(f => ({ ...f, target: e.target.value }))} placeholder="e.g. < 4h delay, ≥ 95%" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Domain</label>
+                  <select value={sForm.domain} onChange={e => setSForm(f => ({ ...f, domain: e.target.value }))} style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none' }}>
+                    {['Finance', 'Marketing', 'Supply Chain', 'Sales', 'Engineering', 'Catalog'].map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Owner</label>
+                  <input value={sForm.owner} onChange={e => setSForm(f => ({ ...f, owner: e.target.value }))} placeholder="Name" style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #ebe8df', display: 'flex', gap: '10px' }}>
+              <button onClick={() => setShowAdd(false)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={addSla} disabled={!sForm.name || !sForm.dataset || !sForm.target} style={{
+                flex: 2, padding: '10px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
+                cursor: sForm.name && sForm.dataset && sForm.target ? 'pointer' : 'not-allowed',
+                background: sForm.name && sForm.dataset && sForm.target ? '#E8541A' : '#e2e8f0',
+                color: sForm.name && sForm.dataset && sForm.target ? '#fff' : '#94a3b8'
+              }}>Create SLA</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
