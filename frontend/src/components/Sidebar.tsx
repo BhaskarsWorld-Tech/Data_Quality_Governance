@@ -202,6 +202,7 @@ const sections: Section[] = [
     railIconD: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
     items: [
       { href: '/data-browser',   label: 'Data Browser',    iconD: 'M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z' },
+      { href: '/spot-check',    label: 'Spot Check',      iconD: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 14l2 2 4-4' },
       { href: '/reports',        label: 'Reports',         iconD: 'M9 19V6a1 1 0 011-1h4a1 1 0 011 1v13M5 19V11a1 1 0 011-1h3v9M19 19v-5a1 1 0 00-1-1h-3v6M3 19h18' },
       { href: '/data-products',  label: 'Data Products',   iconD: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
       { href: '/executive',      label: 'Executive View',  iconD: 'M3 12l2-2 4 4 8-8 4 4M3 21h18' },
