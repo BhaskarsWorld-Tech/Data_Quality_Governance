@@ -99,12 +99,14 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
   const analytics = useMemo(() => {
     const totalRuns = reports.length
     const avgScore = reports.length > 0 ? Math.round(reports.reduce((s, r) => s + r.overallScore, 0) / reports.length) : 0
-    const totalPassed = reports.reduce((s, r) => s + r.passed, 0)
-    const totalFailed = reports.reduce((s, r) => s + r.failed, 0)
-    const totalWarnings = reports.reduce((s, r) => s + r.warnings, 0)
-    const totalChecks = reports.reduce((s, r) => s + r.totalChecks, 0)
+    // Use selected report counts so KPI cards match the filtered results when clicked
+    const src = selected || reports[0]
+    const totalPassed = src ? src.passed : 0
+    const totalFailed = src ? src.failed : 0
+    const totalWarnings = src ? src.warnings : 0
+    const totalChecks = src ? src.totalChecks : 0
     return { totalRuns, avgScore, totalPassed, totalFailed, totalWarnings, totalChecks }
-  }, [reports])
+  }, [reports, selected])
 
   const filteredResults = useMemo(() => {
     if (!selected) return []

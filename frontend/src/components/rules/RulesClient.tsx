@@ -109,6 +109,13 @@ export default function RulesClient({ initialRules, connections }: Props) {
     customSql: '',
   })
 
+  // Sync connectionId when connections load asynchronously
+  useEffect(() => {
+    if (connections.length > 0 && !form.connectionId) {
+      setForm(f => ({ ...f, connectionId: connections[0].id }))
+    }
+  }, [connections])
+
   // Edit form
   const [editForm, setEditForm] = useState<typeof form | null>(null)
 
