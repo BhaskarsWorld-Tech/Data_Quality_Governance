@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { querySnowflake } from '@/lib/snowflake'
 
-export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  try {
-    const { sql, binds } = await req.json()
-    if (!sql) return NextResponse.json({ error: 'sql is required' }, { status: 400 })
-    const rows = await querySnowflake(sql, binds)
-    return NextResponse.json({ rows, count: rows.length })
-  } catch (err: unknown) {
-    const e = err as Error
-    return NextResponse.json({ error: e.message }, { status: 500 })
-  }
+  const { sql } = await req.json()
+  if (!sql) return NextResponse.json({ error: 'sql is required' }, { status: 400 })
+
+  // Return a demo response — Snowflake SDK not available on Cloudflare Workers
+  return NextResponse.json({
+    rows: [{ RESULT: 'Query executed in demo mode — connect a live Snowflake instance for real results', SQL: sql }],
+    count: 1,
+    demo: true,
+  })
 }
