@@ -22,7 +22,23 @@ const memoryStore: Record<string, unknown[]> = {}
 
 // Bundled seed data for edge/demo mode
 const SEED_DATA: Record<string, unknown[]> = {
-  'connections.json': [],
+  'connections.json': [
+    {
+      id: 'conn_sf_data',
+      name: 'SF_Data',
+      type: 'snowflake',
+      host: 'dm_solutions.snowflakecomputing.com',
+      account: 'DM_Solutions',
+      database: 'SUPPLYCHAIN_DB',
+      schema: 'SUPPLYCHAIN',
+      warehouse: 'COMPUTE_WH',
+      role: 'DATA_ENGINEER',
+      username: 'dq_platform_user',
+      status: 'active',
+      createdAt: '2026-01-15T10:00:00Z',
+      lastTested: '2026-05-27T08:00:00Z',
+    },
+  ],
   'rules.json': [],
   'reports.json': [],
 }

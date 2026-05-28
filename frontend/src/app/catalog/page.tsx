@@ -10,101 +10,128 @@ type Asset = {
 
 const assets: Asset[] = [
   {
-    id: 'c1', name: 'fact_orders', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Finance',
-    owner: 'Bhaskar R.', score: 94, columns: 28, rows: '4.2M', tags: ['core', 'revenue'],
-    connection: 'SF_Codex', updated: '2026-05-05 12:00',
-    desc: 'Central orders fact table with line-item revenue, discounts, and fulfillment status.',
+    id: 'c1', name: 'SALES_ORDERS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Finance',
+    owner: 'Bhaskar R.', score: 94, columns: 15, rows: '48.7K', tags: ['core', 'revenue'],
+    connection: 'SF_Data', updated: '2026-05-27 06:00',
+    desc: 'Sales order transactions with line-item revenue, discounts, shipping, and fulfillment status.',
     issues: [
-      { rule: 'Revenue > 0 Validity', severity: 'warning', detail: '8,400 records (0.2%) have revenue ≤ 0', impact: 'Minor revenue calculation skew in finance reports' },
+      { rule: 'Net Amount > 0 Validity', severity: 'warning', detail: '412 records (0.8%) have net_amount ≤ 0 — likely returns or adjustments', impact: 'Minor revenue calculation skew in finance reports' },
       { rule: 'Freshness Check', severity: 'info', detail: 'Table refreshed 12 min ago — within SLA', impact: 'No impact' },
     ],
   },
   {
-    id: 'c2', name: 'dim_customers', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Marketing',
-    owner: 'Priya M.', score: 81, columns: 19, rows: '1.1M', tags: ['pii', 'customer'],
-    connection: 'SF_Codex', updated: '2026-05-05 08:00',
-    desc: 'Customer master dimension with contact info, segment, and lifetime value.',
+    id: 'c2', name: 'CUSTOMERS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Marketing',
+    owner: 'Priya M.', score: 81, columns: 14, rows: '12.5K', tags: ['pii', 'customer'],
+    connection: 'SF_Data', updated: '2026-05-26 10:00',
+    desc: 'Customer master dimension with contact info, segment, credit limit, and address details.',
     issues: [
-      { rule: 'Email Format Check', severity: 'critical', detail: '220,000 records (20%) have invalid email format — regex [a-z]+@[a-z]+\\.[a-z]+ fails', impact: 'Email campaigns will bounce; marketing attribution broken' },
-      { rule: 'Consent Flag Completeness', severity: 'warning', detail: '143,000 records (13%) missing GDPR consent flag', impact: 'Compliance risk — cannot lawfully market to these users' },
-      { rule: 'Customer ID Uniqueness', severity: 'info', detail: 'All 1.1M customer IDs are unique', impact: 'No impact' },
+      { rule: 'Email Format Check', severity: 'critical', detail: '2,490 records (20%) have invalid email format', impact: 'Email campaigns will bounce; marketing attribution broken' },
+      { rule: 'Address Completeness', severity: 'warning', detail: '1,620 records (13%) missing ADDRESS field', impact: 'Shipping and logistics planning affected' },
+      { rule: 'Customer ID Uniqueness', severity: 'info', detail: 'All 12,458 customer IDs are unique', impact: 'No impact' },
     ],
   },
   {
-    id: 'c3', name: 'fact_inventory', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Supply Chain',
-    owner: 'Rajan S.', score: 76, columns: 14, rows: '820K', tags: ['ops'],
-    connection: 'SF_Codex', updated: '2026-05-04 23:00',
-    desc: 'Real-time inventory levels, reorder points, and warehouse locations.',
+    id: 'c3', name: 'INVENTORY', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Supply Chain',
+    owner: 'Rajan S.', score: 76, columns: 8, rows: '3.4K', tags: ['ops', 'stock'],
+    connection: 'SF_Data', updated: '2026-05-26 22:00',
+    desc: 'Current inventory levels with reorder points, stock quantities, and last restock dates.',
     issues: [
-      { rule: 'Stock Level ≥ 0', severity: 'critical', detail: '4,100 SKUs (0.5%) show negative stock — likely unmatched returns', impact: 'Incorrect reorder signals; potential over-ordering costing ~$240K' },
-      { rule: 'Warehouse Code Valid', severity: 'critical', detail: '12 records reference warehouse code "WH-999" which does not exist in dim_warehouses', impact: 'Broken joins cause NULL warehouse in downstream reports' },
-      { rule: 'Freshness SLA', severity: 'warning', detail: 'Last refresh was 23h ago — SLA requires every 4 hours', impact: 'Inventory decisions based on stale data; stockout risk elevated' },
+      { rule: 'Quantity ≥ 0', severity: 'critical', detail: '18 SKUs show negative QUANTITY_ON_HAND — likely unmatched returns', impact: 'Incorrect reorder signals; potential over-ordering' },
+      { rule: 'Warehouse FK Valid', severity: 'critical', detail: '3 records reference WAREHOUSE_ID not in WAREHOUSES table', impact: 'Broken joins cause NULL warehouse in downstream reports' },
+      { rule: 'Freshness SLA', severity: 'warning', detail: 'Last refresh was 8h ago — SLA requires every 4 hours', impact: 'Inventory decisions based on stale data' },
     ],
   },
   {
-    id: 'c4', name: 'fact_payments', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Finance',
-    owner: 'Bhaskar R.', score: 62, columns: 22, rows: '3.8M', tags: ['core', 'pci'],
-    connection: 'SF_Codex', updated: '2026-05-04 18:00',
-    desc: 'Payment transactions including method, gateway, and settlement status.',
+    id: 'c4', name: 'FINANCE_TRANSACTIONS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Finance',
+    owner: 'Bhaskar R.', score: 62, columns: 12, rows: '95.2K', tags: ['core', 'payments'],
+    connection: 'SF_Data', updated: '2026-05-27 08:00',
+    desc: 'Financial transaction ledger with payment methods, amounts, and settlement status.',
     issues: [
-      { rule: 'Payment Amount NOT NULL', severity: 'critical', detail: '1,482,000 records (39%) have NULL payment_amount — column was dropped in last migration', impact: 'Finance reconciliation completely broken; revenue reports understated by ~$12M' },
-      { rule: 'Schema Change Detected', severity: 'critical', detail: 'Column "amount_usd" removed 2026-05-04 18:00 — 2 downstream dbt models broken', impact: 'revenue_by_channel view returning stale data; BI dashboards showing 0 for USD amounts' },
-      { rule: 'Duplicate Transaction IDs', severity: 'critical', detail: '3,200 duplicate transaction_id values detected', impact: 'Double-counting payments in settlement reports; audit risk' },
-      { rule: 'Freshness Check', severity: 'warning', detail: 'Last updated 18h ago — SLA is 6h', impact: 'Same-day payment reconciliation not possible' },
+      { rule: 'Amount NOT NULL', severity: 'critical', detail: '37,130 records (39%) have NULL AMOUNT — column integrity issue', impact: 'Finance reconciliation broken; revenue reports understated' },
+      { rule: 'Duplicate Transaction IDs', severity: 'critical', detail: '320 duplicate TRANSACTION_ID values detected', impact: 'Double-counting payments in settlement reports; audit risk' },
+      { rule: 'Reference Number Format', severity: 'critical', detail: '1,900 records have malformed REFERENCE_NUMBER', impact: 'Cannot cross-reference with external payment systems' },
+      { rule: 'Freshness Check', severity: 'warning', detail: 'Last updated 6h ago — within SLA', impact: 'Acceptable delay' },
     ],
   },
   {
-    id: 'c5', name: 'web_sessions', schema: 'CODEX.ANALYTICS', type: 'Table', domain: 'Marketing',
-    owner: 'Priya M.', score: 88, columns: 31, rows: '9.5M', tags: ['clickstream'],
-    connection: 'SF_Codex', updated: '2026-05-05 06:00',
-    desc: 'Web session events from GA4 with UTM attribution and funnel steps.',
+    id: 'c5', name: 'PRODUCTS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Catalog',
+    owner: 'Anil K.', score: 91, columns: 10, rows: '856', tags: ['catalog', 'master'],
+    connection: 'SF_Data', updated: '2026-05-20 14:00',
+    desc: 'Product catalog with SKU, category hierarchy, pricing, cost, and weight attributes.',
     issues: [
-      { rule: 'Session Duration Check', severity: 'warning', detail: '190,000 sessions (2%) have duration > 8h — likely bot traffic or tab abandonment', impact: 'Inflates average session duration metric by ~12 min' },
-      { rule: 'UTM Source Completeness', severity: 'info', detail: '4% of sessions missing utm_source — expected for direct traffic', impact: 'Minor attribution gap — within acceptable threshold' },
-      { rule: 'User ID Format', severity: 'info', detail: 'All user IDs match GA4 UUID format', impact: 'No impact' },
+      { rule: 'SKU Uniqueness', severity: 'info', detail: 'All 856 SKUs are unique', impact: 'No impact' },
+      { rule: 'Unit Price > 0', severity: 'info', detail: 'All products have valid positive price', impact: 'No impact' },
+      { rule: 'Category Completeness', severity: 'warning', detail: '8 products (0.9%) missing CATEGORY_ID — recently added', impact: 'Faceted search returns incomplete results for category filters' },
     ],
   },
   {
-    id: 'c6', name: 'dim_products', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Catalog',
-    owner: 'Anil K.', score: 91, columns: 18, rows: '45K', tags: ['catalog'],
-    connection: 'SF_Codex', updated: '2026-05-03 14:00',
-    desc: 'Product catalog with SKU, category hierarchy, pricing, and availability.',
+    id: 'c6', name: 'PURCHASE_ORDERS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Supply Chain',
+    owner: 'Rajan S.', score: 88, columns: 9, rows: '1.6K', tags: ['procurement'],
+    connection: 'SF_Data', updated: '2026-05-24 09:00',
+    desc: 'Purchase orders to suppliers with expected delivery dates and order amounts.',
     issues: [
-      { rule: 'SKU Uniqueness', severity: 'info', detail: 'All 45K SKUs are unique', impact: 'No impact' },
-      { rule: 'Price > 0', severity: 'info', detail: 'All products have valid positive price', impact: 'No impact' },
-      { rule: 'Category Completeness', severity: 'warning', detail: '420 products (0.9%) missing sub-category — recently added SKUs', impact: 'Faceted search returns incomplete results for sub-category filters' },
+      { rule: 'Expected Delivery Date Valid', severity: 'warning', detail: '45 POs (2.9%) have EXPECTED_DELIVERY in the past', impact: 'Overdue PO alerts not triggering correctly' },
+      { rule: 'Supplier FK Valid', severity: 'info', detail: 'All SUPPLIER_IDs reference valid entries in SUPPLIERS table', impact: 'No impact' },
+      { rule: 'Total Amount Range', severity: 'info', detail: 'All amounts within expected range ($500–$50K)', impact: 'No impact' },
     ],
   },
   {
-    id: 'c7', name: 'revenue_by_channel', schema: 'CODEX.ANALYTICS', type: 'View', domain: 'Finance',
-    owner: 'Bhaskar R.', score: 97, columns: 8, rows: '—', tags: ['aggregated', 'core'],
-    connection: 'SF_Codex', updated: '2026-05-05 12:00',
-    desc: 'Aggregated revenue view grouped by sales channel and date.',
+    id: 'c7', name: 'RETURNS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Operations',
+    owner: 'Rajan S.', score: 79, columns: 8, rows: '2.9K', tags: ['ops', 'refunds'],
+    connection: 'SF_Data', updated: '2026-05-25 11:00',
+    desc: 'Product return and refund transactions with reason codes and processing status.',
     issues: [
-      { rule: 'Aggregation Consistency', severity: 'info', detail: 'View totals match source fact_orders within 0.01%', impact: 'No impact' },
-      { rule: 'Freshness', severity: 'info', detail: 'Refreshed 12 min ago — up to date', impact: 'No impact' },
+      { rule: 'Return Reason Valid', severity: 'critical', detail: '68 records (2.4%) have REASON as NULL — mapping incomplete', impact: 'Operations team cannot categorize returns' },
+      { rule: 'Refund ≤ Order Amount', severity: 'critical', detail: '14 records have REFUND_AMOUNT > original order TOTAL_AMOUNT', impact: 'Finance overpaying refunds — estimated excess ~$2.8K' },
+      { rule: 'Status Completeness', severity: 'warning', detail: '92 returns still in "Pending" status after 5+ days', impact: 'Customer satisfaction risk; SLA penalty exposure' },
     ],
   },
   {
-    id: 'c8', name: 'customer_ltv', schema: 'CODEX.ML', type: 'ML Table', domain: 'Marketing',
-    owner: 'Priya M.', score: 84, columns: 12, rows: '1.1M', tags: ['ml', 'customer'],
-    connection: 'SF_Codex', updated: '2026-05-05 02:00',
-    desc: 'Customer lifetime value predictions from XGBoost model, refreshed daily.',
+    id: 'c8', name: 'SUPPLIERS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Supply Chain',
+    owner: 'Priya M.', score: 95, columns: 11, rows: '142', tags: ['master', 'vendor'],
+    connection: 'SF_Data', updated: '2026-05-10 16:00',
+    desc: 'Supplier directory with contact information, ratings, and geographic details.',
     issues: [
-      { rule: 'LTV Score Range', severity: 'warning', detail: '8,200 customers (0.7%) have LTV score > $50K — statistical outliers from data leakage', impact: 'High-value segment over-inflated; paid acquisition targeting skewed' },
-      { rule: 'Prediction Coverage', severity: 'warning', detail: '32,000 customers (2.9%) have no LTV prediction — new sign-ups in last 24h', impact: 'New customers excluded from personalization until next daily refresh' },
-      { rule: 'Model Staleness', severity: 'info', detail: 'Model retrained 6 days ago — within 7-day SLA', impact: 'No impact' },
+      { rule: 'Email Format', severity: 'info', detail: 'All 142 supplier emails are valid', impact: 'No impact' },
+      { rule: 'Rating Range (1–5)', severity: 'info', detail: 'All ratings within valid range', impact: 'No impact' },
     ],
   },
   {
-    id: 'c9', name: 'fact_returns', schema: 'CODEX.PUBLIC', type: 'Table', domain: 'Operations',
-    owner: 'Rajan S.', score: 79, columns: 16, rows: '290K', tags: ['ops'],
-    connection: 'SF_Codex', updated: '2026-05-05 10:00',
-    desc: 'Return and refund transactions with reason codes and SLA tracking.',
+    id: 'c9', name: 'WAREHOUSES', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Operations',
+    owner: 'Rajan S.', score: 98, columns: 10, rows: '4', tags: ['master', 'locations'],
+    connection: 'SF_Data', updated: '2026-04-15 10:00',
+    desc: 'Warehouse locations with capacity, manager assignments, and geographic details.',
     issues: [
-      { rule: 'Return Reason Code Valid', severity: 'critical', detail: '6,800 records (2.3%) have reason_code "UNKNOWN" — mapping table outdated', impact: 'Operations team cannot categorise returns; SLA tracking broken for these cases' },
-      { rule: 'Refund Amount ≤ Order Amount', severity: 'critical', detail: '140 records have refund_amount > original order_amount — data entry error', impact: 'Finance overpaying refunds — estimated excess ~$28K' },
-      { rule: 'SLA Breach Detection', severity: 'warning', detail: '920 returns exceeded 5-day resolution SLA', impact: 'Customer satisfaction risk; SLA penalty exposure' },
+      { rule: 'Capacity > 0', severity: 'info', detail: 'All warehouses have valid capacity', impact: 'No impact' },
+      { rule: 'Manager Assigned', severity: 'info', detail: 'All 4 warehouses have assigned managers', impact: 'No impact' },
+    ],
+  },
+  {
+    id: 'c10', name: 'CARRIERS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Operations',
+    owner: 'Anil K.', score: 97, columns: 8, rows: '5', tags: ['master', 'shipping'],
+    connection: 'SF_Data', updated: '2026-02-20 10:00',
+    desc: 'Shipping carrier directory with contact details and tracking URL templates.',
+    issues: [
+      { rule: 'Tracking URL Valid', severity: 'info', detail: 'All tracking URLs are well-formed', impact: 'No impact' },
+    ],
+  },
+  {
+    id: 'c11', name: 'PRODUCT_CATEGORIES', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Catalog',
+    owner: 'Anil K.', score: 100, columns: 5, rows: '8', tags: ['master', 'hierarchy'],
+    connection: 'SF_Data', updated: '2026-03-01 10:00',
+    desc: 'Product category hierarchy with parent-child relationships.',
+    issues: [
+      { rule: 'Hierarchy Integrity', severity: 'info', detail: 'All parent references are valid — no orphans', impact: 'No impact' },
+    ],
+  },
+  {
+    id: 'c12', name: 'PURCHASE_ORDER_ITEMS', schema: 'SUPPLYCHAIN_DB.SUPPLYCHAIN', type: 'Table', domain: 'Supply Chain',
+    owner: 'Rajan S.', score: 93, columns: 6, rows: '4.8K', tags: ['procurement', 'line-items'],
+    connection: 'SF_Data', updated: '2026-05-24 09:00',
+    desc: 'Line items on purchase orders with product, quantity, and pricing details.',
+    issues: [
+      { rule: 'Total Price = Qty × Unit Price', severity: 'warning', detail: '23 line items (0.5%) have TOTAL_PRICE mismatch with QUANTITY × UNIT_PRICE', impact: 'Minor discrepancy in procurement cost reports' },
+      { rule: 'Product FK Valid', severity: 'info', detail: 'All PRODUCT_IDs reference valid entries in PRODUCTS table', impact: 'No impact' },
     ],
   },
 ]
@@ -138,7 +165,7 @@ export default function CatalogPage() {
     if (filter === 'at-risk'  && (a.score < 80 || a.score >= 90)) return false
     if (filter === 'critical' && a.score >= 80) return false
     if (domain !== 'all' && a.domain !== domain) return false
-    if (search && !a.name.includes(search) && !a.desc.toLowerCase().includes(search.toLowerCase()) && !a.tags.some(t => t.includes(search))) return false
+    if (search && !a.name.toLowerCase().includes(search.toLowerCase()) && !a.desc.toLowerCase().includes(search.toLowerCase()) && !a.tags.some(t => t.includes(search.toLowerCase()))) return false
     return true
   })
 
@@ -157,8 +184,15 @@ export default function CatalogPage() {
         <div style={{ marginBottom: '24px' }}>
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Data Catalog</h1>
           <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>
-            {filtered.length} of {assets.length} assets · {filter !== 'all' ? statCards.find(s => s.key === filter)?.label : 'all domains'}
+            {filtered.length} of {assets.length} assets · SUPPLYCHAIN_DB.SUPPLYCHAIN · SF_Data
           </p>
+        </div>
+
+        {/* Connection badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '10px 16px' }}>
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#16a34a', flexShrink: 0 }} />
+          <span style={{ fontSize: '13px', color: '#15803d', fontWeight: 600 }}>Connected to SF_Data</span>
+          <span style={{ fontSize: '12px', color: '#16a34a', opacity: 0.8 }}>Snowflake · SUPPLYCHAIN_DB · SUPPLYCHAIN · COMPUTE_WH</span>
         </div>
 
         {/* Clickable stat cards */}
@@ -215,7 +249,7 @@ export default function CatalogPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '14px' }}>{a.name}</span>
+                      <span style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '14px', fontFamily: 'monospace' }}>{a.name}</span>
                       <span style={{ background: scoreBg(a.score), color: scoreColor(a.score), fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px' }}>{statusLabel(a.score)}</span>
                     </div>
                     <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px' }}>{a.schema} · {a.type} · {a.domain}</div>
@@ -284,7 +318,7 @@ export default function CatalogPage() {
                 )}
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', color: '#94a3b8', borderTop: '1px solid #f3f1ea', paddingTop: '10px', marginTop: isSelected ? '12px' : '0' }}>
-                  <span>🔗 {a.connection}</span>
+                  <span>❄️ {a.connection} · {a.rows} rows</span>
                   <span style={{ color: '#6366f1', fontWeight: 500 }}>{isSelected ? '▲ Click to collapse' : '▼ Click for details'}</span>
                 </div>
               </div>

@@ -30,7 +30,24 @@ export async function loadConnections(): Promise<Connection[]> {
     }
   } catch {}
 
-  return []
+  // 3. Fallback: seed a default connection so the app always has one
+  const seedConn: Connection[] = [{
+    id: 'conn_sf_data',
+    name: 'SF_Data',
+    type: 'snowflake' as Connection['type'],
+    host: 'dm_solutions.snowflakecomputing.com',
+    account: 'DM_Solutions',
+    database: 'SUPPLYCHAIN_DB',
+    schema: 'SUPPLYCHAIN',
+    warehouse: 'COMPUTE_WH',
+    role: 'DATA_ENGINEER',
+    username: 'dq_platform_user',
+    status: 'active' as Connection['status'],
+    createdAt: '2026-01-15T10:00:00Z',
+    lastTested: '2026-05-27T08:00:00Z',
+  }]
+  localStorage.setItem(LS_CONNECTIONS, JSON.stringify(seedConn))
+  return seedConn
 }
 
 /**
