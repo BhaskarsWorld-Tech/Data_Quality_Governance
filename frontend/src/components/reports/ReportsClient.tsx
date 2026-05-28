@@ -36,7 +36,15 @@ const FORMATS = [
 ]
 
 const DOMAINS   = ['All Domains', 'Finance', 'Marketing', 'Supply Chain', 'Catalog', 'Operations']
-const DATASETS  = ['All Datasets', 'fact_orders', 'dim_customers', 'fact_payments', 'fact_inventory', 'web_sessions', 'dim_products', 'fact_returns']
+
+const DATASETS_BY_DOMAIN: Record<string, string[]> = {
+  'Finance':      ['SALES_ORDERS', 'FINANCE_TRANSACTIONS'],
+  'Marketing':    ['CUSTOMERS'],
+  'Supply Chain': ['INVENTORY', 'PURCHASE_ORDERS', 'PURCHASE_ORDER_ITEMS', 'SUPPLIERS'],
+  'Catalog':      ['PRODUCTS', 'PRODUCT_CATEGORIES'],
+  'Operations':   ['RETURNS', 'WAREHOUSES', 'CARRIERS'],
+}
+const ALL_DATASETS = Object.values(DATASETS_BY_DOMAIN).flat()
 const DATE_RANGES = ['Last 24 hours', 'Last 7 days', 'Last 30 days', 'Last 90 days', 'Custom range']
 
 const card: React.CSSProperties = { background: '#fff', borderRadius: '12px', padding: '18px 20px', border: '1px solid #ebe8df' }
@@ -595,14 +603,15 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
                   <label style={lbl}>Domain</label>
-                  <select value={form.domain} onChange={e => setForm(f => ({ ...f, domain: e.target.value }))} style={sel}>
+                  <select value={form.domain} onChange={e => setForm(f => ({ ...f, domain: e.target.value, dataset: 'All Datasets' }))} style={sel}>
                     {DOMAINS.map(d => <option key={d}>{d}</option>)}
                   </select>
                 </div>
                 <div>
                   <label style={lbl}>Dataset</label>
                   <select value={form.dataset} onChange={e => setForm(f => ({ ...f, dataset: e.target.value }))} style={sel}>
-                    {DATASETS.map(d => <option key={d}>{d}</option>)}
+                    <option value="All Datasets">All Datasets</option>
+                    {(form.domain === 'All Domains' ? ALL_DATASETS : (DATASETS_BY_DOMAIN[form.domain] || [])).map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </div>
               </div>
