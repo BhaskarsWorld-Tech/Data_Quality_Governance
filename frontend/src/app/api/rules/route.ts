@@ -10,13 +10,16 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
+  // Every newly created rule must be reviewed by the data stewards group before it
+  // can run. It enters the review queue as pending_review and stays inactive until approved.
   const rule: Rule = {
     ...body,
     id: generateId('rule'),
-    enabled: body.enabled ?? true,
-    status: body.status ?? 'active',
+    enabled: false,
+    status: 'pending_review',
     scope: body.scope ?? 'generic',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    createdBy: body.createdBy || undefined,
   }
   store.rules.create(rule)
   return NextResponse.json(rule, { status: 201 })

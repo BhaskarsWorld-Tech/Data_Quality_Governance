@@ -23,6 +23,7 @@ const RULE_TYPES: { value: RuleType; label: string; desc: string; category: Rule
   { value: 'duplicate_check', label: 'Duplicate Check', desc: 'Detect duplicate records', category: 'uniqueness' },
   { value: 'accepted_values_check', label: 'Accepted Values', desc: 'Values must be in allowed set', category: 'validity' },
   { value: 'range_check', label: 'Range Check', desc: 'Values within min/max range', category: 'accuracy' },
+  { value: 'comparison_check', label: 'Value Comparison', desc: 'Column compared to a value (>, <, =, …)', category: 'validity' },
   { value: 'freshness_check', label: 'Freshness Check', desc: 'Data updated within time window', category: 'timeliness' },
   { value: 'volume_check', label: 'Volume Check', desc: 'Row count within expected bounds', category: 'completeness' },
   { value: 'schema_drift_check', label: 'Schema Drift', desc: 'Detect unexpected schema changes', category: 'consistency' },
@@ -106,6 +107,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
     paramMetricSql: '', paramSampleSize: '100', paramValidationPrompt: '',
     paramBaselineMean: '', paramBaselineStd: '', paramTolerancePct: '20',
     paramRefTable: '', paramRefColumn: '', paramDateColumn: '',
+    paramOperator: '>', paramValue: '',
     customSql: '',
   })
 
@@ -244,6 +246,28 @@ export default function RulesClient({ initialRules, connections }: Props) {
     setRules(prev => prev.map(r => r.id === id ? { ...r, enabled, status } : r))
   }
 
+  // Data stewards approval workflow
+  async function approveRule(id: string) {
+    const approvedBy = 'data-steward'
+    const approvedAt = new Date().toISOString()
+    await fetch('/api/rules', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: 'active', enabled: true, approvedBy, approvedAt, rejectedBy: null, rejectionReason: null })
+    })
+    setRules(prev => prev.map(r => r.id === id ? { ...r, status: 'active', enabled: true, approvedBy, approvedAt, rejectedBy: undefined, rejectionReason: undefined } : r))
+  }
+
+  async function rejectRule(id: string) {
+    const reason = prompt('Reason for rejecting this rule?')
+    if (reason === null) return
+    const rejectedBy = 'data-steward'
+    await fetch('/api/rules', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: 'draft', enabled: false, rejectedBy, rejectionReason: reason })
+    })
+    setRules(prev => prev.map(r => r.id === id ? { ...r, status: 'draft', enabled: false, rejectedBy, rejectionReason: reason } : r))
+  }
+
   async function deleteRule(id: string) {
     if (!confirm('Delete this rule?')) return
     await fetch(`/api/rules?id=${id}`, { method: 'DELETE' })
@@ -308,6 +332,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
     setSaving(true)
     const params: Record<string, unknown> = {}
     if (['range', 'range_check'].includes(form.type)) { if (form.paramMin) params.min = parseFloat(form.paramMin); if (form.paramMax) params.max = parseFloat(form.paramMax) }
+    if (form.type === 'comparison_check') { params.operator = form.paramOperator; if (form.paramOperator === 'between') { if (form.paramMin) params.min = parseFloat(form.paramMin); if (form.paramMax) params.max = parseFloat(form.paramMax) } else { params.value = form.paramValue } }
     if (['regex', 'regex_check'].includes(form.type)) params.pattern = form.paramPattern
     if (['freshness', 'freshness_check'].includes(form.type)) params.maxAgeHours = parseInt(form.paramAge || '24')
     if (['row_count', 'volume_check'].includes(form.type)) { params.minRows = parseInt(form.paramRows || '0'); if (form.paramDateColumn) params.dateColumn = form.paramDateColumn }
@@ -328,10 +353,11 @@ export default function RulesClient({ initialRules, connections }: Props) {
       body: JSON.stringify({ name: form.name, description: form.description, category: form.category, type: form.type, connectionId: form.connectionId, tableName, columnName: form.columnName || undefined, severity: form.severity, status: form.status, scope: form.scope, parameters: params })
     })
     const newRule = await res.json()
-    setRules(prev => [...prev, { ...newRule, status: form.status }])
+    // New rules are always returned as pending_review (awaiting data stewards approval)
+    setRules(prev => [...prev, newRule])
     setShowModal(false)
     setSaving(false)
-    setForm(f => ({ ...f, name: '', description: '', tableName: '', columnName: '', paramMin: '', paramMax: '', paramPattern: '', paramAge: '', paramRows: '', paramAcceptedValues: '', paramCondition: '', paramExpectedColumns: '', paramRefTable: '', paramRefColumn: '', customSql: '', paramMetricSql: '', paramValidationPrompt: '' }))
+    setForm(f => ({ ...f, name: '', description: '', tableName: '', columnName: '', paramMin: '', paramMax: '', paramPattern: '', paramAge: '', paramRows: '', paramAcceptedValues: '', paramCondition: '', paramExpectedColumns: '', paramRefTable: '', paramRefColumn: '', paramValue: '', customSql: '', paramMetricSql: '', paramValidationPrompt: '' }))
     router.refresh()
   }
 
@@ -340,6 +366,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
     setSaving(true)
     const params: Record<string, unknown> = { ...editDrawer.parameters }
     if (['range', 'range_check'].includes(editForm.type)) { if (editForm.paramMin) params.min = parseFloat(editForm.paramMin); if (editForm.paramMax) params.max = parseFloat(editForm.paramMax) }
+    if (editForm.type === 'comparison_check') { params.operator = editForm.paramOperator; if (editForm.paramOperator === 'between') { if (editForm.paramMin) params.min = parseFloat(editForm.paramMin); if (editForm.paramMax) params.max = parseFloat(editForm.paramMax); delete params.value } else { params.value = editForm.paramValue; delete params.min; delete params.max } }
     if (['regex', 'regex_check'].includes(editForm.type)) params.pattern = editForm.paramPattern
     if (['freshness', 'freshness_check'].includes(editForm.type)) params.maxAgeHours = parseInt(editForm.paramAge || '24')
     if (['row_count', 'volume_check'].includes(editForm.type)) { params.minRows = parseInt(editForm.paramRows || '0'); if (editForm.paramDateColumn) params.dateColumn = editForm.paramDateColumn }
@@ -402,6 +429,8 @@ export default function RulesClient({ initialRules, connections }: Props) {
       paramRefTable: String(rule.parameters?.reference_table ?? ''),
       paramRefColumn: String(rule.parameters?.reference_column ?? ''),
       paramDateColumn: String(rule.parameters?.dateColumn ?? ''),
+      paramOperator: String(rule.parameters?.operator ?? '>'),
+      paramValue: String(rule.parameters?.value ?? ''),
       customSql: String(rule.parameters?.sql ?? ''),
     })
   }
@@ -629,7 +658,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
 
                 {/* Expand/Actions */}
                 <div style={{ width: '60px', display: 'flex', gap: '4px' }}>
-                  <button onClick={(e) => { e.stopPropagation(); groupRules.forEach(r => testRule(r.id)) }}
+                  <button onClick={(e) => { e.stopPropagation(); groupRules.filter(r => r.status === 'active').forEach(r => testRule(r.id)) }}
                     style={{ padding: '4px 6px', borderRadius: '6px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '11px', cursor: 'pointer' }}>▶ All</button>
                 </div>
               </div>
@@ -643,6 +672,8 @@ export default function RulesClient({ initialRules, connections }: Props) {
                     const conn = connections.find(c => c.id === rule.connectionId)
                     const isRunning = testing === rule.id
                     const result = testResults[rule.id]
+                    const isPending = rule.status === 'pending_review'
+                    const canRun = rule.status === 'active'
                     return (
                       <div key={rule.id} style={{
                         display: 'flex', alignItems: 'center', gap: '6px',
@@ -668,6 +699,16 @@ export default function RulesClient({ initialRules, connections }: Props) {
                               {rule.description ? `— ${rule.description}` : ''}
                             </span>
                           </div>
+                          {rule.rejectionReason && (
+                            <div style={{ fontSize: '10.5px', color: '#dc2626', marginTop: '2px' }}>
+                              ✕ Rejected by {rule.rejectedBy || 'steward'}: {rule.rejectionReason}
+                            </div>
+                          )}
+                          {rule.status === 'active' && rule.approvedBy && (
+                            <div style={{ fontSize: '10.5px', color: '#16a34a', marginTop: '2px' }}>
+                              ✓ Approved by {rule.approvedBy}
+                            </div>
+                          )}
                         </div>
 
                         {/* Severity */}
@@ -707,11 +748,20 @@ export default function RulesClient({ initialRules, connections }: Props) {
                         </div>
 
                         {/* Actions */}
-                        <div style={{ width: '140px', display: 'flex', gap: '4px' }}>
+                        <div style={{ width: '210px', display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {isPending && (
+                            <>
+                              <button onClick={() => approveRule(rule.id)} title="Approve and activate this rule"
+                                style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #86efac', background: '#dcfce7', color: '#16a34a', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>✓ Approve</button>
+                              <button onClick={() => rejectRule(rule.id)} title="Reject this rule"
+                                style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #fecaca', background: '#fee2e2', color: '#dc2626', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>✕ Reject</button>
+                            </>
+                          )}
                           <button onClick={() => openEdit(rule)}
                             style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4f46e5', fontSize: '11px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}>✏ Edit</button>
-                          <button onClick={() => testRule(rule.id)} disabled={isRunning}
-                            style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '11px', fontWeight: 500, cursor: 'pointer' }}>▶ Test</button>
+                          <button onClick={() => canRun && testRule(rule.id)} disabled={isRunning || !canRun}
+                            title={canRun ? 'Run this rule' : 'Rule must be approved (Active) before it can run'}
+                            style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #dbeafe', background: canRun ? '#f0f9ff' : '#f8fafc', color: canRun ? '#2563eb' : '#cbd5e1', fontSize: '11px', fontWeight: 500, cursor: canRun ? 'pointer' : 'not-allowed' }}>▶ Run</button>
                           <button onClick={() => deleteRule(rule.id)}
                             style={{ padding: '4px 6px', borderRadius: '6px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '11px', cursor: 'pointer' }}>🗑</button>
                         </div>
@@ -855,19 +905,20 @@ export default function RulesClient({ initialRules, connections }: Props) {
               {/* Dynamic Config Fields */}
               {renderConfigFields(form, (k, v) => setForm(f => ({ ...f, [k]: v })), inp)}
 
-              {/* Severity & Status */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Severity</label>
-                  <select value={form.severity} onChange={e => setForm(f => ({ ...f, severity: e.target.value as Rule['severity'] }))} style={inp()}>
-                    {Object.entries(SEVERITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Status</label>
-                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as RuleStatus }))} style={inp()}>
-                    {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                  </select>
+              {/* Severity */}
+              <div>
+                <label style={{ fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '5px' }}>Severity</label>
+                <select value={form.severity} onChange={e => setForm(f => ({ ...f, severity: e.target.value as Rule['severity'] }))} style={inp()}>
+                  {Object.entries(SEVERITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+
+              {/* Approval notice — new rules go to the data stewards review queue */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', padding: '10px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px' }}>
+                <span style={{ fontSize: '14px' }}>🛡️</span>
+                <div style={{ fontSize: '12px', color: '#92400e', lineHeight: 1.4 }}>
+                  This rule will be submitted to the <strong>Data Stewards</strong> group for review.
+                  It stays <strong>Pending Review</strong> and cannot run until a steward approves it.
                 </div>
               </div>
 
@@ -1069,8 +1120,18 @@ function StatusDropdown({ rule, stat, onUpdate }: {
 
 /* ── Dynamic Config Fields ───────────────────────────────────────── */
 
+const COMPARISON_OPS: { value: string; label: string }[] = [
+  { value: '>', label: 'greater than  ( > )' },
+  { value: '>=', label: 'greater than or equal  ( ≥ )' },
+  { value: '<', label: 'less than  ( < )' },
+  { value: '<=', label: 'less than or equal  ( ≤ )' },
+  { value: '=', label: 'equal to  ( = )' },
+  { value: '!=', label: 'not equal to  ( ≠ )' },
+  { value: 'between', label: 'between (inclusive)' },
+]
+
 function renderConfigFields(
-  form: { type: string; paramMin: string; paramMax: string; paramPattern: string; paramAge: string; paramRows: string; paramAcceptedValues: string; paramCondition: string; paramExpectedColumns: string; paramRefTable: string; paramRefColumn: string; paramDateColumn: string; paramMetricSql: string; paramSampleSize: string; paramValidationPrompt: string; paramBaselineMean: string; paramBaselineStd: string; paramTolerancePct: string; customSql: string },
+  form: { type: string; paramMin: string; paramMax: string; paramPattern: string; paramAge: string; paramRows: string; paramAcceptedValues: string; paramCondition: string; paramExpectedColumns: string; paramRefTable: string; paramRefColumn: string; paramDateColumn: string; paramMetricSql: string; paramSampleSize: string; paramValidationPrompt: string; paramBaselineMean: string; paramBaselineStd: string; paramTolerancePct: string; paramOperator: string; paramValue: string; customSql: string },
   set: (key: string, value: string) => void,
   inp: (s?: React.CSSProperties) => React.CSSProperties
 ) {
@@ -1087,6 +1148,37 @@ function renderConfigFields(
         <div><label style={lbl}>Min Value</label><input value={form.paramMin} onChange={e => set('paramMin', e.target.value)} placeholder="0" style={inp()} /></div>
         <div><label style={lbl}>Max Value</label><input value={form.paramMax} onChange={e => set('paramMax', e.target.value)} placeholder="100000" style={inp()} /></div>
       </div>
+    )
+  } else if (t === 'comparison_check') {
+    fields = (
+      <>
+        <div style={{ fontSize: '11.5px', color: '#64748b' }}>Flag rows where the column does <strong>not</strong> satisfy this condition.</div>
+        {form.paramOperator === 'between' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', alignItems: 'end' }}>
+            <div>
+              <label style={lbl}>Operator</label>
+              <select value={form.paramOperator} onChange={e => set('paramOperator', e.target.value)} style={inp()}>
+                {COMPARISON_OPS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div><label style={lbl}>Min</label><input value={form.paramMin} onChange={e => set('paramMin', e.target.value)} placeholder="0" style={inp()} /></div>
+            <div><label style={lbl}>Max</label><input value={form.paramMax} onChange={e => set('paramMax', e.target.value)} placeholder="1000" style={inp()} /></div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', alignItems: 'end' }}>
+            <div>
+              <label style={lbl}>Operator</label>
+              <select value={form.paramOperator} onChange={e => set('paramOperator', e.target.value)} style={inp()}>
+                {COMPARISON_OPS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div><label style={lbl}>Value</label><input value={form.paramValue} onChange={e => set('paramValue', e.target.value)} placeholder="1000" style={inp()} /></div>
+          </div>
+        )}
+        <div style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>
+          e.g. NET_AMOUNT {form.paramOperator === 'between' ? `BETWEEN ${form.paramMin || '0'} AND ${form.paramMax || '1000'}` : `${form.paramOperator} ${form.paramValue || '1000'}`}
+        </div>
+      </>
     )
   } else if (['regex', 'regex_check'].includes(t)) {
     fields = <div><label style={lbl}>Regex Pattern</label><input value={form.paramPattern} onChange={e => set('paramPattern', e.target.value)} placeholder="^[a-zA-Z0-9._%+-]+@..." style={inp({ fontFamily: 'monospace', fontSize: '12px' })} /></div>

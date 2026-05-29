@@ -130,6 +130,11 @@ async def list_rules_enriched(
 @router.post("", response_model=RuleResponse)
 async def create_rule(payload: RuleCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     rule = DQRule(rule_id=str(uuid.uuid4()), **payload.model_dump())
+    # All newly created rules must be reviewed by the data stewards group before they
+    # can run. Force them into the review queue and keep them inactive until approved.
+    rule.status = "pending_review"
+    rule.is_active = False
+    rule.created_by = user.get("email")
     if not rule.rule_sql and rule.rule_type != "custom_sql_check":
         asset_result = await db.execute(select(DataAsset).where(DataAsset.asset_id == rule.asset_id))
         asset = asset_result.scalar_one_or_none()

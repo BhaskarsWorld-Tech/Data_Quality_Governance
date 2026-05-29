@@ -36,7 +36,7 @@ export type RuleType =
   | 'range_check' | 'freshness_check' | 'volume_check' | 'schema_drift_check'
   | 'referential_integrity_check' | 'regex_check' | 'business_rule_check' | 'custom_sql_check'
   | 'semantic_consistency_check' | 'referential_sanity_check' | 'business_metric_check'
-  | 'distribution_consistency_check' | 'llm_semantic_check'
+  | 'distribution_consistency_check' | 'llm_semantic_check' | 'comparison_check'
 
 export type RuleStatus = 'active' | 'draft' | 'pending_review' | 'disabled' | 'archived'
 
@@ -55,6 +55,11 @@ export interface Rule {
   severity: 'critical' | 'high' | 'medium' | 'low'
   scope: 'generic' | 'object-specific'
   createdAt: string
+  createdBy?: string
+  approvedBy?: string
+  approvedAt?: string
+  rejectedBy?: string
+  rejectionReason?: string
   lastRunAt?: string
   lastRunStatus?: 'passed' | 'failed' | 'warning' | 'error'
   lastRunScore?: number

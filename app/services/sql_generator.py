@@ -122,6 +122,7 @@ class SQLGenerator:
             "duplicate_check":                self._duplicate_check,
             "accepted_values_check":          self._accepted_values_check,
             "range_check":                    self._range_check,
+            "comparison_check":               self._comparison_check,
             "freshness_check":                self._freshness_check,
             "volume_check":                   self._volume_check,
             "schema_drift_check":             self._schema_drift_check,
@@ -184,6 +185,43 @@ class SQLGenerator:
             raise ValueError("range_check requires min_value or max_value in config")
         where = " OR ".join(conditions)
         return f"SELECT COUNT(*) AS failed_count FROM {table_ref} WHERE {where}"
+
+    _COMPARISON_OPS = {">", ">=", "<", "<=", "=", "!=", "<>", "between"}
+
+    def _format_value(self, value: Any) -> str:
+        """Render a literal: numbers/booleans bare, everything else single-quoted (escaped)."""
+        if isinstance(value, bool):
+            return "TRUE" if value else "FALSE"
+        if isinstance(value, (int, float)):
+            return str(value)
+        s = str(value).strip()
+        # Allow bare numeric strings; otherwise treat as a quoted string literal.
+        try:
+            float(s)
+            return s
+        except ValueError:
+            return "'" + s.replace("'", "''") + "'"
+
+    def _comparison_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
+        if not column:
+            raise ValueError("comparison_check requires target_column")
+        operator = str(config.get("operator") or config.get("op") or ">").strip().lower()
+        if operator not in self._COMPARISON_OPS:
+            raise ValueError(f"comparison_check: unsupported operator '{operator}'")
+        col = f'"{column}"'
+        if operator == "between":
+            min_val = config.get("min", config.get("min_value"))
+            max_val = config.get("max", config.get("max_value"))
+            if min_val is None or max_val is None:
+                raise ValueError("comparison_check BETWEEN requires min and max")
+            valid = f"{col} BETWEEN {self._format_value(min_val)} AND {self._format_value(max_val)}"
+        else:
+            value = config.get("value", config.get("val"))
+            if value is None:
+                raise ValueError("comparison_check requires a value")
+            valid = f"{col} {operator.upper()} {self._format_value(value)}"
+        # Failed rows are those that do not satisfy the valid condition (NULLs count as failures).
+        return f"SELECT COUNT(*) AS failed_count FROM {table_ref} WHERE NOT ({valid}) OR {col} IS NULL"
 
     def _freshness_check(self, config: dict, table_ref: str, column: Optional[str]) -> str:
         if not column:
