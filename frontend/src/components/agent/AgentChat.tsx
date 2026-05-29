@@ -42,44 +42,98 @@ function RobotIconSmall({ size = 18 }: { size?: number }) {
   return <RobotIcon size={size} />
 }
 
-function MarkdownText({ text }: { text: string }) {
-  const lines = text.split('\n')
+function MarkdownTable({ lines }: { lines: string[] }) {
+  const rows = lines
+    .filter(l => !l.match(/^\|[\s-:|]+\|$/))
+    .map(l => l.split('|').slice(1, -1).map(c => c.trim()))
+  if (rows.length === 0) return null
+  const header = rows[0]
+  const body = rows.slice(1)
   return (
-    <div style={{ fontSize: '13px', lineHeight: '1.6', color: '#1e293b' }}>
-      {lines.map((line, i) => {
-        if (line.startsWith('## ')) return <div key={i} style={{ fontWeight: 700, fontSize: '14px', margin: '8px 0 4px', color: '#0f172a' }}>{line.slice(3)}</div>
-        if (line.startsWith('# ')) return <div key={i} style={{ fontWeight: 700, fontSize: '15px', margin: '8px 0 4px', color: '#0f172a' }}>{line.slice(2)}</div>
-        if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ paddingLeft: '12px', marginBottom: '2px' }}>• {line.slice(2)}</div>
-        if (line.startsWith('**') && line.endsWith('**')) return <div key={i} style={{ fontWeight: 700 }}>{line.slice(2, -2)}</div>
-        if (line === '') return <div key={i} style={{ height: '6px' }} />
-        // Handle inline bold
-        const parts = line.split(/(\*\*[^*]+\*\*)/)
-        return (
-          <div key={i} style={{ marginBottom: '1px' }}>
-            {parts.map((part, j) =>
-              part.startsWith('**') && part.endsWith('**')
-                ? <strong key={j}>{part.slice(2, -2)}</strong>
-                : part
-            )}
-          </div>
-        )
-      })}
+    <div style={{ overflowX: 'auto', margin: '6px 0' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+        <thead>
+          <tr>{header.map((h, i) => (
+            <th key={i} style={{ padding: '4px 8px', background: '#f1f5f9', borderBottom: '2px solid #e2e8f0', textAlign: 'left', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>{h}</th>
+          ))}</tr>
+        </thead>
+        <tbody>
+          {body.map((row, i) => (
+            <tr key={i} style={{ background: i % 2 ? '#f8fafc' : '#fff' }}>
+              {row.map((cell, j) => (
+                <td key={j} style={{ padding: '3px 8px', borderBottom: '1px solid #f1f5f9', color: '#334155', whiteSpace: 'nowrap' }}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
 
+function MarkdownText({ text }: { text: string }) {
+  const lines = text.split('\n')
+  const elements: React.ReactNode[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    // Detect markdown table (starts with |)
+    if (line.trimStart().startsWith('|')) {
+      const tableLines: string[] = []
+      while (i < lines.length && lines[i].trimStart().startsWith('|')) {
+        tableLines.push(lines[i])
+        i++
+      }
+      elements.push(<MarkdownTable key={`tbl-${i}`} lines={tableLines} />)
+      continue
+    }
+    if (line.startsWith('### ')) { elements.push(<div key={i} style={{ fontWeight: 700, fontSize: '13px', margin: '8px 0 3px', color: '#0f172a' }}>{line.slice(4)}</div>); i++; continue }
+    if (line.startsWith('## ')) { elements.push(<div key={i} style={{ fontWeight: 700, fontSize: '14px', margin: '8px 0 4px', color: '#0f172a' }}>{line.slice(3)}</div>); i++; continue }
+    if (line.startsWith('# ')) { elements.push(<div key={i} style={{ fontWeight: 700, fontSize: '15px', margin: '8px 0 4px', color: '#0f172a' }}>{line.slice(2)}</div>); i++; continue }
+    if (line.startsWith('- ') || line.startsWith('* ')) { elements.push(<div key={i} style={{ paddingLeft: '12px', marginBottom: '2px' }}>• {line.slice(2)}</div>); i++; continue }
+    if (line.startsWith('**') && line.endsWith('**')) { elements.push(<div key={i} style={{ fontWeight: 700 }}>{line.slice(2, -2)}</div>); i++; continue }
+    if (line === '') { elements.push(<div key={i} style={{ height: '6px' }} />); i++; continue }
+    // Code block
+    if (line.startsWith('```')) {
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].startsWith('```')) { codeLines.push(lines[i]); i++ }
+      i++ // skip closing ```
+      elements.push(
+        <pre key={`code-${i}`} style={{ background: '#1e293b', color: '#e2e8f0', padding: '8px 10px', borderRadius: '8px', fontSize: '11px', overflowX: 'auto', margin: '4px 0' }}>
+          {codeLines.join('\n')}
+        </pre>
+      )
+      continue
+    }
+    // Handle inline bold
+    const parts = line.split(/(\*\*[^*]+\*\*)/)
+    elements.push(
+      <div key={i} style={{ marginBottom: '1px' }}>
+        {parts.map((part, j) =>
+          part.startsWith('**') && part.endsWith('**')
+            ? <strong key={j}>{part.slice(2, -2)}</strong>
+            : part
+        )}
+      </div>
+    )
+    i++
+  }
+  return <div style={{ fontSize: '13px', lineHeight: '1.6', color: '#1e293b' }}>{elements}</div>
+}
+
 const SUGGESTIONS = [
   "Show me my connections",
-  "Add a PostgreSQL connection",
-  "Create a not-null rule",
-  "Run a quality check",
-  "Show latest report",
+  "Top 20 sales by region",
+  "What tables are in my warehouse?",
+  "Explain columns in ORDERS table",
+  "Show domain quality scores",
   "What rules do I have?",
 ]
 
 const INITIAL_MSG: AgentMessage = {
   role: 'assistant',
-  content: "Hi! I'm **DataGuard AI** 🛡️\n\nI can help you:\n- **Add connections** to your databases\n- **Create quality rules** (null checks, uniqueness, ranges, patterns)\n- **Run quality checks** and view reports\n- **Answer questions** about data quality\n\nWhat would you like to do?",
+  content: "Hi! I'm **DataGuard AI** 🛡️\n\nI can help you:\n- **Query your warehouse** — ask questions like *\"top 20 sales by region\"*\n- **Explore tables & columns** — discover schemas, understand how metrics are derived\n- **Create quality rules** and run checks\n- **Monitor data quality** across all your domains\n\nWhat would you like to do?",
   timestamp: '2026-01-01T00:00:00.000Z'   // stable — avoids server/client hydration mismatch
 }
 

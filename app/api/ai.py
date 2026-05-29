@@ -837,6 +837,61 @@ AGENT_TOOLS = [
             "required": ["asset_id"]
         }
     },
+    {
+        "name": "discover_warehouse_schema",
+        "description": "Browse a connected warehouse to discover databases, schemas, and tables. Use this first to find what tables exist before querying data. Call with just connection_id to list databases; add database to list schemas; add database+schema to list tables with row counts.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "string", "description": "Connection ID (use list_connections to find it)"},
+                "database": {"type": "string", "description": "Database name to browse schemas/tables in"},
+                "schema": {"type": "string", "description": "Schema name to list tables in (requires database)"}
+            },
+            "required": ["connection_id"]
+        }
+    },
+    {
+        "name": "get_table_columns",
+        "description": "Get detailed column information for a specific table including column names, data types, nullability, and sample values. Use this to understand what data a table contains before writing a query.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "string", "description": "Connection ID"},
+                "database": {"type": "string", "description": "Database name"},
+                "schema": {"type": "string", "description": "Schema name"},
+                "table": {"type": "string", "description": "Table name"}
+            },
+            "required": ["connection_id", "database", "schema", "table"]
+        }
+    },
+    {
+        "name": "query_warehouse",
+        "description": "Execute a SQL query against the connected warehouse and return results. Use this after discovering tables and columns to answer analytical questions like 'top 20 sales by region' or 'average order value per month'. Only SELECT queries are allowed. Results are limited to 100 rows.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "string", "description": "Connection ID"},
+                "sql": {"type": "string", "description": "The SELECT SQL query to execute"},
+                "limit": {"type": "integer", "description": "Max rows to return (default 100, max 500)"}
+            },
+            "required": ["connection_id", "sql"]
+        }
+    },
+    {
+        "name": "explain_columns",
+        "description": "Explain what columns in a table mean, how they are derived, their data types, relationships, and statistical profile. Use this when the user asks how metrics are calculated or what a column represents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "connection_id": {"type": "string", "description": "Connection ID"},
+                "database": {"type": "string", "description": "Database name"},
+                "schema": {"type": "string", "description": "Schema name"},
+                "table": {"type": "string", "description": "Table name"},
+                "columns": {"type": "array", "items": {"type": "string"}, "description": "Specific columns to explain (optional, explains all if omitted)"}
+            },
+            "required": ["connection_id", "database", "schema", "table"]
+        }
+    },
 ]
 
 
@@ -1022,6 +1077,284 @@ async def _execute_agent_tool(tool_name: str, tool_input: dict, db: AsyncSession
                 "rules": [{"id": r.rule_id, "name": r.rule_name, "type": r.rule_type} for r in rules]
             }
 
+        elif tool_name == "discover_warehouse_schema":
+            conn_id = tool_input.get("connection_id")
+            if not conn_id:
+                return {"error": "connection_id is required"}
+            conn_res = await db.execute(
+                select(SnowflakeConnection).where(SnowflakeConnection.connection_id == conn_id)
+            )
+            conn = conn_res.scalar_one_or_none()
+            if not conn:
+                return {"error": f"Connection '{conn_id}' not found"}
+
+            from app.api.connections import _open_connector, _safe_ident
+            database = tool_input.get("database")
+            schema = tool_input.get("schema")
+
+            def _browse():
+                sf = _open_connector(conn)
+                cur = sf.cursor()
+                try:
+                    if database and schema:
+                        db_s = _safe_ident(database, "database")
+                        sc_s = _safe_ident(schema, "schema")
+                        cur.execute(f"""
+                            SELECT table_name, table_type,
+                                   COALESCE(row_count, 0) AS row_count,
+                                   COALESCE(comment, '') AS comment
+                            FROM "{db_s}".INFORMATION_SCHEMA.TABLES
+                            WHERE UPPER(table_schema) = '{sc_s.upper()}'
+                            ORDER BY table_name
+                        """)
+                        rows = cur.fetchall()
+                        return {
+                            "level": "tables",
+                            "database": database,
+                            "schema": schema,
+                            "tables": [
+                                {"name": r[0], "type": r[1], "row_count": r[2], "comment": r[3]}
+                                for r in rows
+                            ],
+                        }
+                    elif database:
+                        db_s = _safe_ident(database, "database")
+                        cur.execute(f'SHOW SCHEMAS IN DATABASE "{db_s}"')
+                        rows = cur.fetchall()
+                        col_names = [d[0].lower() for d in cur.description]
+                        return {
+                            "level": "schemas",
+                            "database": database,
+                            "schemas": [
+                                dict(zip(col_names, r)).get("name", "")
+                                for r in rows
+                                if dict(zip(col_names, r)).get("name", "").upper() != "INFORMATION_SCHEMA"
+                            ],
+                        }
+                    else:
+                        cur.execute("SHOW DATABASES")
+                        rows = cur.fetchall()
+                        col_names = [d[0].lower() for d in cur.description]
+                        return {
+                            "level": "databases",
+                            "databases": [
+                                dict(zip(col_names, r)).get("name", "")
+                                for r in rows
+                                if dict(zip(col_names, r)).get("name", "").upper()
+                                not in ("SNOWFLAKE", "SNOWFLAKE_SAMPLE_DATA")
+                            ],
+                        }
+                finally:
+                    cur.close()
+                    sf.close()
+
+            import asyncio as _aio
+            return await _aio.to_thread(_browse)
+
+        elif tool_name == "get_table_columns":
+            conn_id = tool_input.get("connection_id")
+            database = tool_input.get("database", "")
+            schema = tool_input.get("schema", "")
+            table = tool_input.get("table", "")
+            if not all([conn_id, database, schema, table]):
+                return {"error": "connection_id, database, schema, and table are all required"}
+
+            conn_res = await db.execute(
+                select(SnowflakeConnection).where(SnowflakeConnection.connection_id == conn_id)
+            )
+            conn = conn_res.scalar_one_or_none()
+            if not conn:
+                return {"error": f"Connection '{conn_id}' not found"}
+
+            from app.api.connections import _open_connector, _safe_ident
+
+            def _cols():
+                sf = _open_connector(conn)
+                cur = sf.cursor()
+                db_s = _safe_ident(database, "database")
+                sc_s = _safe_ident(schema, "schema")
+                tb_s = _safe_ident(table, "table")
+                try:
+                    cur.execute(f"""
+                        SELECT column_name, data_type, is_nullable, ordinal_position,
+                               COALESCE(comment, '') AS comment
+                        FROM "{db_s}".INFORMATION_SCHEMA.COLUMNS
+                        WHERE UPPER(table_schema) = '{sc_s.upper()}'
+                          AND UPPER(table_name) = '{tb_s.upper()}'
+                        ORDER BY ordinal_position
+                    """)
+                    col_rows = cur.fetchall()
+                    columns = [
+                        {"name": r[0], "type": r[1], "nullable": r[2], "position": r[3], "comment": r[4]}
+                        for r in col_rows
+                    ]
+                    # Fetch a few sample rows to help understand the data
+                    cur.execute(f'SELECT * FROM "{db_s}"."{sc_s}"."{tb_s}" LIMIT 5')
+                    sample_col_names = [d[0] for d in cur.description]
+                    sample_rows = [list(r) for r in cur.fetchall()]
+                    return {
+                        "table": f"{database}.{schema}.{table}",
+                        "column_count": len(columns),
+                        "columns": columns,
+                        "sample_columns": sample_col_names,
+                        "sample_rows": sample_rows,
+                    }
+                finally:
+                    cur.close()
+                    sf.close()
+
+            import asyncio as _aio
+            return await _aio.to_thread(_cols)
+
+        elif tool_name == "query_warehouse":
+            conn_id = tool_input.get("connection_id")
+            sql = tool_input.get("sql", "").strip()
+            row_limit = min(tool_input.get("limit", 100), 500)
+
+            if not conn_id or not sql:
+                return {"error": "connection_id and sql are required"}
+
+            # Safety: only allow SELECT statements
+            sql_upper = sql.upper().lstrip()
+            if not sql_upper.startswith("SELECT") and not sql_upper.startswith("WITH"):
+                return {"error": "Only SELECT queries are allowed for safety. No INSERT/UPDATE/DELETE/DROP."}
+            # Block dangerous patterns
+            import re as _re
+            _BLOCKED = _re.compile(r'\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|MERGE)\b', _re.IGNORECASE)
+            if _BLOCKED.search(sql):
+                return {"error": "Query contains disallowed statements. Only SELECT/WITH queries are permitted."}
+
+            conn_res = await db.execute(
+                select(SnowflakeConnection).where(SnowflakeConnection.connection_id == conn_id)
+            )
+            conn = conn_res.scalar_one_or_none()
+            if not conn:
+                return {"error": f"Connection '{conn_id}' not found"}
+
+            from app.api.connections import _open_connector
+
+            def _query():
+                sf = _open_connector(conn)
+                cur = sf.cursor()
+                try:
+                    # Wrap in a LIMIT if not already limited
+                    exec_sql = sql.rstrip(";")
+                    if "LIMIT" not in sql.upper():
+                        exec_sql = f"SELECT * FROM ({exec_sql}) AS _q LIMIT {row_limit}"
+                    cur.execute(exec_sql)
+                    col_names = [d[0] for d in cur.description]
+                    rows = [list(r) for r in cur.fetchall()]
+                    return {
+                        "columns": col_names,
+                        "rows": rows,
+                        "row_count": len(rows),
+                        "sql_executed": exec_sql,
+                    }
+                finally:
+                    cur.close()
+                    sf.close()
+
+            import asyncio as _aio
+            return await _aio.to_thread(_query)
+
+        elif tool_name == "explain_columns":
+            conn_id = tool_input.get("connection_id")
+            database = tool_input.get("database", "")
+            schema = tool_input.get("schema", "")
+            table = tool_input.get("table", "")
+            target_cols = tool_input.get("columns", [])
+
+            if not all([conn_id, database, schema, table]):
+                return {"error": "connection_id, database, schema, and table are all required"}
+
+            conn_res = await db.execute(
+                select(SnowflakeConnection).where(SnowflakeConnection.connection_id == conn_id)
+            )
+            conn = conn_res.scalar_one_or_none()
+            if not conn:
+                return {"error": f"Connection '{conn_id}' not found"}
+
+            from app.api.connections import _open_connector, _safe_ident
+
+            def _explain():
+                sf = _open_connector(conn)
+                cur = sf.cursor()
+                db_s = _safe_ident(database, "database")
+                sc_s = _safe_ident(schema, "schema")
+                tb_s = _safe_ident(table, "table")
+                try:
+                    # Get column metadata
+                    cur.execute(f"""
+                        SELECT column_name, data_type, is_nullable, ordinal_position,
+                               COALESCE(comment, '') AS comment
+                        FROM "{db_s}".INFORMATION_SCHEMA.COLUMNS
+                        WHERE UPPER(table_schema) = '{sc_s.upper()}'
+                          AND UPPER(table_name) = '{tb_s.upper()}'
+                        ORDER BY ordinal_position
+                    """)
+                    all_cols = [
+                        {"name": r[0], "type": r[1], "nullable": r[2], "position": r[3], "comment": r[4]}
+                        for r in cur.fetchall()
+                    ]
+                    if target_cols:
+                        upper_targets = {c.upper() for c in target_cols}
+                        all_cols = [c for c in all_cols if c["name"].upper() in upper_targets]
+
+                    # Check if table is a view and get the definition
+                    cur.execute(f"""
+                        SELECT table_type FROM "{db_s}".INFORMATION_SCHEMA.TABLES
+                        WHERE UPPER(table_schema) = '{sc_s.upper()}'
+                          AND UPPER(table_name) = '{tb_s.upper()}'
+                    """)
+                    table_type_row = cur.fetchone()
+                    table_type = table_type_row[0] if table_type_row else "BASE TABLE"
+
+                    view_definition = None
+                    if table_type and "VIEW" in str(table_type).upper():
+                        cur.execute(f"""
+                            SELECT view_definition FROM "{db_s}".INFORMATION_SCHEMA.VIEWS
+                            WHERE UPPER(table_schema) = '{sc_s.upper()}'
+                              AND UPPER(table_name) = '{tb_s.upper()}'
+                        """)
+                        vrow = cur.fetchone()
+                        view_definition = vrow[0] if vrow else None
+
+                    # Get basic stats for numeric/date columns
+                    stat_cols = [c for c in all_cols if any(
+                        t in c["type"].upper() for t in ("NUMBER", "INT", "FLOAT", "DECIMAL", "DOUBLE", "DATE", "TIMESTAMP")
+                    )]
+                    stats = {}
+                    for c in stat_cols[:10]:
+                        try:
+                            cn = c["name"]
+                            cur.execute(f"""
+                                SELECT COUNT(*) AS total, COUNT("{cn}") AS non_null,
+                                       COUNT(DISTINCT "{cn}") AS distinct_vals,
+                                       MIN("{cn}") AS min_val, MAX("{cn}") AS max_val
+                                FROM "{db_s}"."{sc_s}"."{tb_s}"
+                            """)
+                            sr = cur.fetchone()
+                            stats[cn] = {
+                                "total_rows": sr[0], "non_null": sr[1],
+                                "distinct_values": sr[2], "min": str(sr[3]), "max": str(sr[4]),
+                            }
+                        except Exception:
+                            pass
+
+                    return {
+                        "table": f"{database}.{schema}.{table}",
+                        "table_type": table_type,
+                        "view_definition": view_definition,
+                        "columns": all_cols,
+                        "column_stats": stats,
+                    }
+                finally:
+                    cur.close()
+                    sf.close()
+
+            import asyncio as _aio
+            return await _aio.to_thread(_explain)
+
         else:
             return {"error": f"Unknown tool: {tool_name}"}
 
@@ -1048,15 +1381,26 @@ async def agent_chat(
     provider_name = await get_value("llm_provider", db) or settings.llm_provider or "ollama"
 
     system_prompt = """You are DataGuard AI, an expert Data Quality & Governance assistant.
-You have access to tools that let you query the DataGuard platform in real-time.
-Use them to answer questions about data quality scores, rules, alerts, connections, and domains.
+You have access to tools that let you query the DataGuard platform AND connected data warehouses in real-time.
 
-When users ask about platform health, use get_dashboard_stats.
-When users ask about rules, use list_rules with appropriate filters.
-When users ask about alerts or issues, use get_alerts.
-When users ask about domains, use get_domains.
-When users ask about recent checks, use get_recent_runs.
-When users ask about tables or datasets, use search_assets.
+PLATFORM TOOLS (metadata, rules, alerts):
+- list_connections → find available warehouse connections
+- get_dashboard_stats → platform health overview
+- list_rules / get_alerts / get_domains / get_recent_runs / search_assets → platform data
+
+WAREHOUSE QUERY TOOLS (live data from connected warehouses):
+When users ask analytical questions about their data (e.g., "top 20 sales by region", "average revenue per month"):
+1. Use list_connections to find the connection ID
+2. Use discover_warehouse_schema to browse databases → schemas → tables
+3. Use get_table_columns to see column names, types, and sample data
+4. Use query_warehouse to execute a SQL query and return results
+5. Use explain_columns to describe what columns mean, how views derive them, and column statistics
+
+WORKFLOW for analytical questions:
+- First discover what tables exist, then inspect columns, then write and execute SQL
+- Present results in a clear markdown table
+- Explain what the data shows and how metrics are derived
+- If a table is a VIEW, explain_columns will show the view definition (the SQL that derives the columns)
 
 Be conversational, helpful, and proactive. Format responses with markdown for readability.
 Always explain the data quality impact and recommend next steps."""

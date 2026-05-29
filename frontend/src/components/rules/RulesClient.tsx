@@ -92,7 +92,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(initialRules.map(r => r.type)))
 
   // Create form
   const [form, setForm] = useState({
@@ -339,10 +339,17 @@ export default function RulesClient({ initialRules, connections }: Props) {
     if (!editDrawer || !editForm) return
     setSaving(true)
     const params: Record<string, unknown> = { ...editDrawer.parameters }
-    // Build params from editForm similar to save()
     if (['range', 'range_check'].includes(editForm.type)) { if (editForm.paramMin) params.min = parseFloat(editForm.paramMin); if (editForm.paramMax) params.max = parseFloat(editForm.paramMax) }
     if (['regex', 'regex_check'].includes(editForm.type)) params.pattern = editForm.paramPattern
     if (['freshness', 'freshness_check'].includes(editForm.type)) params.maxAgeHours = parseInt(editForm.paramAge || '24')
+    if (['row_count', 'volume_check'].includes(editForm.type)) { params.minRows = parseInt(editForm.paramRows || '0'); if (editForm.paramDateColumn) params.dateColumn = editForm.paramDateColumn }
+    if (editForm.type === 'accepted_values_check') params.accepted_values = editForm.paramAcceptedValues.split(',').map(s => s.trim()).filter(Boolean)
+    if (['business_rule_check', 'semantic_consistency_check', 'referential_sanity_check'].includes(editForm.type)) params.condition = editForm.paramCondition
+    if (editForm.type === 'schema_drift_check') params.expected_columns = editForm.paramExpectedColumns.split(',').map(s => s.trim()).filter(Boolean)
+    if (['referential', 'referential_integrity_check'].includes(editForm.type)) { params.reference_table = editForm.paramRefTable; params.reference_column = editForm.paramRefColumn }
+    if (editForm.type === 'business_metric_check') { params.metric_sql = editForm.paramMetricSql; if (editForm.paramMin) params.min_value = parseFloat(editForm.paramMin); if (editForm.paramMax) params.max_value = parseFloat(editForm.paramMax) }
+    if (editForm.type === 'distribution_consistency_check') { if (editForm.paramBaselineMean) params.baseline_mean = parseFloat(editForm.paramBaselineMean); if (editForm.paramBaselineStd) params.baseline_std = parseFloat(editForm.paramBaselineStd); params.tolerance_pct = parseInt(editForm.paramTolerancePct || '20') }
+    if (editForm.type === 'llm_semantic_check') { params.sample_size = parseInt(editForm.paramSampleSize || '100'); params.validation_prompt = editForm.paramValidationPrompt }
     if (['custom_sql', 'custom_sql_check'].includes(editForm.type)) params.sql = editForm.customSql
 
     await fetch('/api/rules', {
@@ -351,6 +358,8 @@ export default function RulesClient({ initialRules, connections }: Props) {
         id: editDrawer.id, name: editForm.name, description: editForm.description,
         category: editForm.category, type: editForm.type, severity: editForm.severity,
         status: editForm.status, enabled: editForm.status === 'active',
+        connectionId: editForm.connectionId, tableName: editForm.tableName,
+        columnName: editForm.columnName || undefined,
         parameters: params,
       })
     })
@@ -358,6 +367,9 @@ export default function RulesClient({ initialRules, connections }: Props) {
       ...r, name: editForm.name, description: editForm.description,
       category: editForm.category, type: editForm.type, severity: editForm.severity,
       status: editForm.status, enabled: editForm.status === 'active',
+      connectionId: editForm.connectionId, tableName: editForm.tableName,
+      columnName: editForm.columnName || undefined,
+      parameters: params,
     } : r))
     setEditDrawer(null)
     setEditForm(null)
@@ -695,13 +707,13 @@ export default function RulesClient({ initialRules, connections }: Props) {
                         </div>
 
                         {/* Actions */}
-                        <div style={{ width: '80px', display: 'flex', gap: '3px' }}>
-                          <button onClick={() => testRule(rule.id)} disabled={isRunning}
-                            style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '11px', cursor: 'pointer' }}>▶</button>
+                        <div style={{ width: '140px', display: 'flex', gap: '4px' }}>
                           <button onClick={() => openEdit(rule)}
-                            style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '11px', cursor: 'pointer' }}>✏</button>
+                            style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #c7d2fe', background: '#eef2ff', color: '#4f46e5', fontSize: '11px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}>✏ Edit</button>
+                          <button onClick={() => testRule(rule.id)} disabled={isRunning}
+                            style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #dbeafe', background: '#f0f9ff', color: '#2563eb', fontSize: '11px', fontWeight: 500, cursor: 'pointer' }}>▶ Test</button>
                           <button onClick={() => deleteRule(rule.id)}
-                            style={{ padding: '4px 6px', borderRadius: '5px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '11px', cursor: 'pointer' }}>🗑</button>
+                            style={{ padding: '4px 6px', borderRadius: '6px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '11px', cursor: 'pointer' }}>🗑</button>
                         </div>
                       </div>
                     )
@@ -966,12 +978,32 @@ export default function RulesClient({ initialRules, connections }: Props) {
                   style={{ ...inp(), fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' as const }} />
               </div>
 
-              {/* Read-only info */}
-              <div style={{ padding: '12px', background: '#fafaf9', borderRadius: '8px', border: '1px solid #ebe8df' }}>
-                <div style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Target</div>
-                <div style={{ fontSize: '12px', color: '#475569' }}>
-                  <span style={{ fontFamily: 'monospace' }}>{editDrawer.tableName}{editDrawer.columnName ? `.${editDrawer.columnName}` : ''}</span>
-                  <span style={{ color: '#94a3b8' }}> · {connections.find(c => c.id === editDrawer.connectionId)?.name || 'Unknown'}</span>
+              {/* Target */}
+              <div style={{ padding: '12px', background: '#fafaf9', borderRadius: '8px', border: '1px solid #ebe8df', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ fontSize: '10.5px', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Target</div>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Connection</label>
+                  <select value={editForm.connectionId} onChange={e => setEditForm(f => f ? { ...f, connectionId: e.target.value } : f)} style={inp()}>
+                    {connections.map(c => <option key={c.id} value={c.id}>{c.name} ({c.type})</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Table</label>
+                    <select value={editForm.tableName} onChange={e => { setEditForm(f => f ? { ...f, tableName: e.target.value, columnName: '' } : f); if (e.target.value) fetchColumns(e.target.value) }} style={inp()}>
+                      <option value="">Select table</option>
+                      {availableTables.map(t => <option key={t} value={t}>{t}</option>)}
+                      {editForm.tableName && !availableTables.includes(editForm.tableName) && <option value={editForm.tableName}>{editForm.tableName}</option>}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 500, color: '#64748b', display: 'block', marginBottom: '4px' }}>Column</label>
+                    <select value={editForm.columnName} onChange={e => setEditForm(f => f ? { ...f, columnName: e.target.value } : f)} style={inp()}>
+                      <option value="">All columns</option>
+                      {availableColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                      {editForm.columnName && !availableColumns.includes(editForm.columnName) && <option value={editForm.columnName}>{editForm.columnName}</option>}
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
